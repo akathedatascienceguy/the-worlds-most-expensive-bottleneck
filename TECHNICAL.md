@@ -178,16 +178,30 @@ def apply_hormuz_crisis(G, severity=0.88):
 
 `severity` is sampled uniformly in `[0.45, 0.95]` during Monte Carlo runs, and set to 0.90 for the deterministic crisis button. The ±0.05 jitter prevents unrealistic uniformity across edges.
 
-### 3.3 Baseline Risk Values
+### 3.3 Baseline Risk Values (Real Data Calibration)
 
-| Route Segment | Base Risk | Rationale |
-|---------------|-----------|-----------|
-| Producers → Hormuz | 0.25 | Chronic background tension |
-| Hormuz → Indian Ocean | 0.25 | Same chokepoint dependency |
-| Bypass pipelines | 0.10–0.12 | Onshore, lower exposure |
-| Bab-el-Mandeb / Suez | 0.18–0.22 | Yemen conflict proximity |
-| Indian Ocean open water | 0.08–0.14 | Lower geopolitical exposure |
-| Cape of Good Hope | 0.08 | Remote, stable maritime zone |
+`base_risk` is calibrated to **Lloyd's / S&P war-risk insurance premium bands** — the market's real-time aggregation of geopolitical risk into a price. Full sourcing in `DATA_SOURCES.md §5`.
+
+| Route Segment | Base Risk | Insur. Premium Band | Source |
+|---------------|-----------|---------------------|--------|
+| Producers → Hormuz | 0.28 | ~0.25–0.50% hull | S&P Global / Lloyd's 2024 baseline |
+| Hormuz → Indian Ocean | 0.28 | ~0.25% hull | Same Hormuz-dependent exposure |
+| Saudi East-West Pipeline (Yanbu) | 0.08 | ~0.05–0.10% hull | Onshore, below Gulf tension zone |
+| UAE Fujairah pipeline | 0.09 | ~0.05–0.10% hull | Onshore UAE, low war-risk |
+| Red Sea / Bab-el-Mandeb | 0.35 | ~0.70% hull (2024) | AGBI / Maplecroft; down from 2.0% peak |
+| Suez Canal | 0.18 | ~0.10–0.20% hull | IEA / EIA Suez analysis |
+| Strait of Malacca | 0.05 | ~0.05% hull | Lloyd's JWC removed from high-risk May 2024 |
+| Indian Ocean (open water) | 0.07 | ~0.05% hull | Standard open-ocean baseline |
+| Cape of Good Hope | 0.02 | ~0.01% hull | Remote, stable maritime zone |
+
+**Crisis severity benchmarks** (used in Monte Carlo / stress test):
+
+| Scenario | Severity | Real Equivalent |
+|----------|----------|-----------------|
+| Moderate tension | 0.45 | Hormuz 2019 tanker attacks (~0.50% hull) |
+| Serious escalation | 0.70 | Estimated major-incident level |
+| Near-closure | 0.90 | Lloyd's March 2026 Gulf escalation (~1.0% hull) |
+| Active conflict | 1.00 | 1980s Tanker War peak (~5% hull, ~WS 1000) |
 
 ### 3.4 Risk Signal Sources (Production Extension)
 
