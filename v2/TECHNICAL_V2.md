@@ -1,7 +1,7 @@
-# Technical Report: v2 — Deep Q-Network + LSTM Risk Predictor
+# Technical Report: v2 — Deep Q-Network + LSTM Risk Predictor + Economic Cascade Model
 
 **Project:** The World's Most Expensive Bottleneck — v2  
-**Stack:** Python 3.x · PyTorch 2.x · NetworkX · Plotly · Streamlit  
+**Stack:** Python 3.x · PyTorch 2.x · NetworkX · Plotly · Streamlit · NumPy (economic modelling)  
 **Entry point:** `v2/app_v2.py` (self-contained)  
 **Prerequisite reading:** `TECHNICAL.md` (v1) covers graph construction, Dijkstra routing, and Monte Carlo stress testing — those components are unchanged in v2.
 
@@ -20,6 +20,7 @@
 9. [Evaluation & Diagnostics](#9-evaluation--diagnostics)
 10. [Architecture Comparison: v1 vs v2](#10-architecture-comparison-v1-vs-v2)
 11. [Limitations & Next Steps](#11-limitations--next-steps)
+12. [Economic Cascade Model](#12-economic-cascade-model)
 
 ---
 
@@ -680,6 +681,9 @@ Displayed in Model Internals. At 600 episodes ε ≈ 0.16 (still 16% random), at
 | **Loss function** | None (table update) | Huber loss on Bellman targets |
 | **Gradient clipping** | N/A | max norm 1.0 |
 | **Routing algorithm** | Risk-aware Dijkstra | Risk-aware Dijkstra (unchanged) |
+| **Economic modelling** | Not present | Oil price shock → CPI → food → GDP cascade |
+| **Economic calibration** | N/A | 7 historical events; IMF WP/17/53 coefficients |
+| **Economic simulation** | Not present | Monte Carlo (n=500); 6-phase time series; Sankey |
 
 ### 10.2 Inference Behaviour
 
@@ -689,6 +693,8 @@ Displayed in Model Internals. At 600 episodes ε ≈ 0.16 (still 16% random), at
 | Rising risk (pre-crisis) | No anticipation | LSTM detects sentiment lead, updates risk prediction, DQN pre-empts |
 | Post-crisis recovery | Sudden Q update on next visit | LSTM models insurance lag, smooth risk decay |
 | Novel route not seen in training | Q = 0 (never explored) | Non-zero Q estimate from neighbouring states |
+| Macro impact of a disruption | Not modelled | Economic cascade: oil price → freight → CPI → food → GDP across 5 regions |
+| Tail-risk quantification | Not available | Monte Carlo (n=500) gives 95th percentile economic outcomes |
 
 ### 10.3 Total Parameter Count
 
