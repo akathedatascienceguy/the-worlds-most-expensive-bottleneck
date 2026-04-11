@@ -108,19 +108,35 @@ build_oil_network() → nx.DiGraph
 
 ### 2.2 Edge Topology
 
-The graph has 22 directed edges. Key structural properties:
+The graph has **24 directed edges**. Key structural properties:
 
-**Hormuz funnel:** All five Gulf producers have a direct edge into the `Hormuz` node. `Hormuz` has a single outbound edge to `Indian Ocean Hub` with capacity 18.0 MBD — the bottleneck edge. All six of these edges are flagged `hormuz_dependent=True`.
+**Hormuz funnel:** All five Gulf producers have a direct edge into the `Hormuz` node. `Hormuz` has a single outbound edge to `Indian Ocean Hub` with capacity 20.0 MBD — the bottleneck edge. All six of these edges are flagged `hormuz_dependent=True`.
 
 **Bypass routes:**
-- `Saudi Arabia → Yanbu` (East-West Pipeline, capacity 2.0 MBD) → Red Sea → Suez/Bab-el-Mandeb
-- `UAE → Fujairah` (Abu Dhabi Crude Oil Pipeline, capacity 1.5 MBD) → Indian Ocean Hub
+- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, **7.0 MBD** post-March 2026 upgrade — Fortune/Argus Media/CNBC, March 28 2026) → Red Sea → Bab-el-Mandeb → **Indian Ocean Hub** (southbound exit into Indian Ocean) or → Suez Canal (northbound to Europe/USA)
+- `UAE → Fujairah` (ADCO/Habshan pipeline, 1.5 MBD, ADNOC) → Indian Ocean Hub directly
+
+**Critical connectivity note:** The bypass graph is fully closed for all producer-consumer pairs. `Bab-el-Mandeb → Indian Ocean Hub` is the key edge enabling Saudi Arabia to reach India, China, and Japan without transiting Hormuz. Without it, the Yanbu bypass terminates at Suez Canal and Asian consumers are unreachable by any Hormuz-free path.
 
 **Consumer-facing legs:**
-- `Indian Ocean Hub → India` (short haul)
-- `Indian Ocean Hub → Strait of Malacca → China / Japan` (East Asia)
-- `Suez Canal / Bab-el-Mandeb → Europe / USA` (West)
-- `Cape of Good Hope → Europe / USA` (long-haul bypass, lowest risk, highest time)
+- `Indian Ocean Hub → India` (short haul, ~2 days)
+- `Indian Ocean Hub → Strait of Malacca → China / Japan` (East Asia, ~20 + 5/8 days)
+- `Indian Ocean Hub → Cape of Good Hope → Europe / USA / India / Strait of Malacca` (ultra-long bypass, lowest risk)
+- `Suez Canal → Europe / USA` (West, via Red Sea/Bab-el-Mandeb northbound)
+
+**Complete edge list by category:**
+
+| Category | Edges | Count |
+|----------|-------|-------|
+| Producers → Hormuz | SA, UAE, Iraq, Kuwait, Qatar | 5 |
+| Bypass pipelines | SA→Yanbu, UAE→Fujairah | 2 |
+| Hormuz outbound | Hormuz→IOH, Fujairah→IOH | 2 |
+| Red Sea corridor | Yanbu→RS, RS→Bab, Bab→Suez, Bab→IOH | 4 |
+| IOH → consumers/hubs | IOH→India, IOH→Malacca, IOH→Cape | 3 |
+| Malacca → East Asia | Malacca→China, Malacca→Japan | 2 |
+| Suez → West | Suez→Europe, Suez→USA | 2 |
+| Cape → consumers | Cape→Europe, Cape→USA, Cape→India, Cape→Malacca | 4 |
+| **Total** | | **24** |
 
 ### 2.3 Capacity Constraints
 
@@ -318,7 +334,7 @@ def _state(self, G, node):
     return (node, risks)
 ```
 
-Risk is discretised to 5 levels (0, 0.25, 0.5, 0.75, 1.0) to keep the state space tractable. With 22 edges and 5 risk levels, the theoretical state space is 19 × 5²² — in practice, only a small subset of states is visited during training.
+Risk is discretised to 5 levels (0, 0.25, 0.5, 0.75, 1.0) to keep the state space tractable. With 24 edges and 5 risk levels, the theoretical state space is 19 × 5²⁴ — in practice, only a tiny fraction of states is visited during training. This is the fundamental limitation of tabular Q-learning on this problem (see §10.1).
 
 **Reward shaping:** The +50 terminal reward for reaching the target is critical — without it, the agent learns to wander (accumulating small penalties is preferable to the large cost of any single high-risk edge).
 
@@ -445,7 +461,7 @@ for _ in range(500):
 
 The network is drawn on a Plotly `Scattergeo` figure — a world map projection with overlay traces.
 
-**Edge rendering:** One trace per edge (22 traces total). Each trace is a 3-point line `[lon_u, lon_v, None]` / `[lat_u, lat_v, None]` — the `None` breaks the line so edges don't connect to each other.
+**Edge rendering:** One trace per edge (24 traces total). Each trace is a 3-point line `[lon_u, lon_v, None]` / `[lat_u, lat_v, None]` — the `None` breaks the line so edges don't connect to each other.
 
 ```python
 fig.add_trace(go.Scattergeo(
@@ -588,7 +604,7 @@ History logging (Risk Simulator tab)
         ▼
 Visualisation
   draw_network(G, path)
-    ├── 22 edge traces (risk-coloured, width ∝ capacity)
+    ├── 24 edge traces (risk-coloured, width ∝ capacity)
     ├── Path edges drawn in gold at width 5
     └── Node markers coloured by type, gold border if in path
         │
@@ -617,16 +633,16 @@ QLearningAgent.train(G, source, target, n_episodes)
 
 ## 10. Limitations & Extensions
 
-### 10.1 Current Limitations
+### 10.1 Current Limitations (v1)
 
-| Limitation | Description |
-|------------|-------------|
-| Capacity not enforced | Edge capacity is surfaced as a metric but not a hard constraint. Flow can exceed `k(e)`. |
-| Static graph topology | Edges don't appear/disappear. In reality, canal closures and pipeline shutdowns remove edges entirely. |
-| Simulated risk only | Risk is generated by OU process, not real signals. Production system would ingest news/AIS/market data. |
-| Single-commodity flow | Model routes one flow at a time. Real logistics involves simultaneous multi-commodity flows. |
-| Q-table scalability | Tabular Q-learning doesn't scale to large graphs. DQN (neural network approximator) needed for real deployments. |
-| Undirected bypass routes | Some real bypass pipelines are bidirectional; current model only has directed edges. |
+| Limitation | Description | v2 Status |
+|------------|-------------|-----------|
+| Capacity not enforced | Edge capacity is surfaced as a metric but not a hard constraint. Flow can exceed `k(e)`. | Still open |
+| Static graph topology | Edges don't appear/disappear. In reality, canal closures and pipeline shutdowns remove edges entirely. | Still open |
+| Simulated risk only | Risk is generated by OU process, not real signals. | **LSTM in v2** trains on correlated synthetic signals (oil vol, insurance, sentiment) |
+| Single-commodity flow | Model routes one flow at a time. Real logistics involves simultaneous multi-commodity flows. | Still open |
+| Q-table scalability | Tabular Q-learning doesn't scale — 19 × 5²⁴ theoretical state space, almost entirely unvisited. | **DQN in v2** generalises via neural interpolation |
+| No economic impact model | Routing optimisation tells you the path cost, not the macro consequences of disruption. | **Economic Cascade in v2** covers oil price → CPI → food → GDP |
 
 ### 10.2 Direct Extensions
 
@@ -643,14 +659,17 @@ min Σ c(e)·f(e)    subject to:
 
 Instead of scalarising cost/time/risk into a single weight, compute the full Pareto frontier across two or three objectives using NSGA-II or epsilon-constraint method.
 
-**Deep Q-Network (DQN):**
+**Deep Q-Network (DQN):** *(implemented in v2)*
 
-Replace the tabular Q-function with a neural network:
-```
-Input:  graph embedding (node features + edge risk vector)
-Output: Q-value for each possible next node
-```
-GNN-based state encoders (Graph Attention Networks) are a natural fit.
+v2 replaces the tabular Q-function with a 3-layer neural network (41→256→128→19 dims) with experience replay, frozen target network, Huber loss, and action masking. See `v2/TECHNICAL_V2.md §4` for the full implementation.
+
+**LSTM Risk Predictor:** *(implemented in v2)*
+
+v2 trains a 2-layer LSTM on correlated synthetic risk signals (risk, oil volatility, insurance premium, sentiment) to predict next-step edge risks across all edges simultaneously. See `v2/TECHNICAL_V2.md §3`.
+
+**Economic cascade model:** *(implemented in v2)*
+
+v2 includes a full macro transmission model: oil price shock → freight premium → regional CPI → food prices → GDP contraction, calibrated to 7 historical disruptions with IMF WP/17/53 pass-through coefficients. See `v2/TECHNICAL_V2.md §12`.
 
 **Live data integration:**
 
@@ -676,4 +695,5 @@ Model "time until disruption" as a survival function with hazard rate λ(t) driv
 
 ---
 
-*End of Technical Document*
+*End of v1 Technical Document*  
+*See also: `v2/TECHNICAL_V2.md` (DQN + LSTM + Economic Cascade), `DATA_SOURCES.md` (real data citations)*

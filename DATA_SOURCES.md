@@ -23,10 +23,10 @@ Every numeric parameter in the graph model is either directly sourced from a pub
 
 | Pipeline | Capacity (MBD) | Notes | Source |
 |----------|----------------|-------|--------|
-| Saudi East-West (Petroline → Yanbu) | 5.0 | Historical nameplate; upgraded to 7.0 MBD March 2026 | Fortune / Argus Media / CNBC, March 28 2026; CEO Amin Nasser confirmation |
+| Saudi East-West (Petroline → Yanbu) | 7.0 | Upgraded March 2026 (prev. nameplate 5.0 MBD) | Fortune / Argus Media / CNBC, March 28 2026; CEO Amin Nasser confirmation |
 | UAE ADCO (Habshan → Fujairah) | 1.5 (expandable to 1.8) | 360 km, 48-inch pipe; operational since June 2012 | Wikipedia / Global Energy Monitor / ADNOC |
 
-The POC uses **5.0 MBD** for Yanbu (the pre-2026 figure, conservative). The 7.0 MBD upgrade is relevant for scenario planning and noted in the app commentary.
+Both apps use **7.0 MBD** for Yanbu, reflecting the confirmed March 2026 upgrade. The previous 5.0 MBD nameplate is no longer the operative capacity.
 
 ---
 

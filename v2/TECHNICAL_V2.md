@@ -3,7 +3,7 @@
 **Project:** The World's Most Expensive Bottleneck — v2  
 **Stack:** Python 3.x · PyTorch 2.x · NetworkX · Plotly · Streamlit · NumPy (economic modelling)  
 **Entry point:** `v2/app_v2.py` (self-contained)  
-**Prerequisite reading:** `TECHNICAL.md` (v1) covers graph construction, Dijkstra routing, and Monte Carlo stress testing — those components are unchanged in v2.
+**Prerequisite reading:** `TECHNICAL.md` (v1) covers graph construction, Dijkstra routing, and Monte Carlo stress testing. Both v1 and v2 share the same 24-edge graph with three bypass-completion edges added: `Bab-el-Mandeb → Indian Ocean Hub`, `Cape of Good Hope → India`, and `Cape of Good Hope → Strait of Malacca`. These close the bypass graph for all producer-consumer pairs — see `TECHNICAL.md §2.2` for the full edge table.
 
 ---
 
@@ -114,14 +114,14 @@ The insurance update rule — 85% autoregression, 15% current risk — produces 
 
 ```
 n_steps = 2000   (default)
-n_edges = 21
+n_edges = 24
 n_features = 4
 
-data shape: (2000, 21, 4)
+data shape: (2000, 24, 4)
 
 Sequence construction:
-  X[i] = data[i : i + SEQ_LEN]          → shape (SEQ_LEN, 21, 4)
-  y[i] = data[i + SEQ_LEN, :, 0]        → shape (21,)   [risk only]
+  X[i] = data[i : i + SEQ_LEN]          → shape (SEQ_LEN, 24, 4)
+  y[i] = data[i + SEQ_LEN, :, 0]        → shape (24,)   [risk only]
 
 Total sequences: 2000 - 10 - 1 = 1989
 Train: 1591 sequences (80%)
@@ -137,9 +137,9 @@ Val:    398 sequences (20%)
 ```
 Input:  (B, SEQ_LEN=10, N_EDGES=21, N_FEATURES=4)
         ↓ reshape
-        (B, 10, 84)              [flatten last two dims: 21 × 4]
+        (B, 10, 96)              [flatten last two dims: 24 × 4]
         ↓
-LSTM Layer 1:  input=84, hidden=128, dropout=0.2 on output
+LSTM Layer 1:  input=96, hidden=128, dropout=0.2 on output
 LSTM Layer 2:  input=128, hidden=128
         ↓ take last hidden state
         (B, 128)
@@ -155,12 +155,12 @@ Output: (B, 21)    predicted r(e, t+1) ∈ (0, 1) for all edges
 
 | Component | Parameters |
 |-----------|-----------|
-| LSTM Layer 1 | 4 × (84×128 + 128×128 + 128) = 109,568 |
+| LSTM Layer 1 | 4 × (96×128 + 128×128 + 128) = 115,200 |
 | LSTM Layer 2 | 4 × (128×128 + 128×128 + 128) = 131,584 |
 | Linear 128→64 | 128×64 + 64 = 8,256 |
-| Linear 64→21  | 64×21 + 21 = 1,365 |
+| Linear 64→24  | 64×24 + 24 = 1,560 |
 | Dropout (no params) | 0 |
-| **Total** | **~251,285** |
+| **Total** | **~251,480** |
 
 ### 3.2 Design Decisions
 
@@ -204,7 +204,7 @@ At runtime, a **rolling window** of SEQ_LEN=10 recent observations is maintained
 
 ```python
 # 1. LSTM predicts next-step risks
-pred = lstm.predict_next(risk_window)      # (21,) float array
+pred = lstm.predict_next(risk_window)      # (24,) float array
 
 # 2. Update graph edge weights
 for i, (u, v) in enumerate(edge_list):
@@ -243,10 +243,10 @@ DQN replaces the table with a neural network `Q(s, a; θ)` that maps a *continuo
 ### 4.2 State Representation
 
 ```
-State vector (41 dimensions, float32):
+State vector (43 dimensions, float32):
 
 [  one-hot node encoding  |  LSTM-predicted edge risks  ]
-[  19 dims               |  21 dims                    ]
+[  19 dims               |  24 dims                    ]
 
 node_oh[i] = 1.0 if current_node == node_list[i] else 0.0
 risks[j]   = G[edge_list[j][0]][edge_list[j][1]]["risk"]
@@ -273,9 +273,9 @@ This ensures the network never selects an unreachable node. During training, onl
 ### 4.4 Network Architecture
 
 ```
-Input (41,)
+Input (43,)
     │
-Linear(41 → 256) ─── bias
+Linear(43 → 256) ─── bias
     │
 LayerNorm(256)          ← stabilises training, prevents internal covariate shift
     │
@@ -296,7 +296,7 @@ Output (19,)   ← Q-value per node (masked before use)
 
 | Layer | Weights | Bias | Total |
 |-------|---------|------|-------|
-| Linear 41→256 | 41×256=10,496 | 256 | 10,752 |
+| Linear 43→256 | 43×256=11,008 | 256 | 11,264 |
 | LayerNorm(256) | 256 (γ) | 256 (β) | 512 |
 | Linear 256→128 | 256×128=32,768 | 128 | 32,896 |
 | Linear 128→19 | 128×19=2,432 | 19 | 2,451 |
@@ -670,11 +670,11 @@ Displayed in Model Internals. At 600 episodes ε ≈ 0.16 (still 16% random), at
 |-----------|----|----|
 | **Risk engine** | OU stochastic process | Trained LSTM |
 | **Risk inputs** | None (generates internally) | (risk, oil_vol, insurance, sentiment) window |
-| **Risk params** | 0 (formula, no learning) | ~251,285 |
+| **Risk params** | 0 (formula, no learning) | ~256,600 |
 | **Risk output** | Noisy sample from OU | Calibrated forecast `r̂(e, t+1)` |
 | **Risk generalisation** | None | Yes — LSTM interpolates unseen sequences |
-| **Agent model** | Python `defaultdict` | 3-layer DQN, ~46,355 params |
-| **State space** | Discrete: 19 × 5²¹ buckets | Continuous: ℝ^41 |
+| **Agent model** | Python `defaultdict` | 3-layer DQN, ~47,123 params |
+| **State space** | Discrete: 19 × 5²⁴ buckets | Continuous: ℝ^43 |
 | **State seen during training** | ~0.0% of theoretical space | N/A (network interpolates) |
 | **Training stability** | None | Replay buffer + target network |
 | **Action selection** | ε-greedy on dict lookup | ε-greedy on masked network forward pass |
@@ -700,10 +700,10 @@ Displayed in Model Internals. At 600 episodes ε ≈ 0.16 (still 16% random), at
 
 | Model | Parameters | Trainable |
 |-------|-----------|-----------|
-| LSTM Risk Predictor | ~251,285 | Yes |
-| DQN Policy Network | ~46,355 | Yes (during training) |
-| DQN Target Network | ~46,355 | No (frozen, copied from policy) |
-| **Total** | **~344,000** | **~297,640** |
+| LSTM Risk Predictor | ~256,600 | Yes |
+| DQN Policy Network | ~47,123 | Yes (during training) |
+| DQN Target Network | ~47,123 | No (frozen, copied from policy) |
+| **Total** | **~350,846** | **~303,723** |
 
 ---
 

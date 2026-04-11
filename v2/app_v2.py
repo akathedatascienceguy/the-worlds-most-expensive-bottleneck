@@ -117,11 +117,11 @@ def build_oil_network() -> nx.DiGraph:
         ("Iraq",         "Hormuz",           1, 0.8,  3.37, 0.28, True),
         ("Kuwait",       "Hormuz",           1, 0.5,  1.57, 0.28, True),
         ("Qatar",        "Hormuz",           1, 0.4,  0.51, 0.28, True),
-        ("Saudi Arabia", "Yanbu",            6, 3.0,  5.00, 0.08, False),
+        ("Saudi Arabia", "Yanbu",            6, 3.0,  7.00, 0.08, False),  # 7.0 MBD post-March 2026 upgrade
         ("UAE",          "Fujairah",         4, 1.5,  1.50, 0.09, False),
         ("Hormuz",       "Indian Ocean Hub", 1, 1.5, 20.00, 0.28, True),
         ("Fujairah",     "Indian Ocean Hub", 2, 0.7,  1.50, 0.09, False),
-        ("Yanbu",        "Red Sea",          1, 1.0,  5.00, 0.09, False),
+        ("Yanbu",        "Red Sea",          1, 1.0,  7.00, 0.09, False),
         ("Red Sea",      "Bab-el-Mandeb",    2, 2.0,  8.80, 0.35, False),
         ("Bab-el-Mandeb","Suez Canal",       3, 3.5,  7.50, 0.35, False),
         ("Indian Ocean Hub", "India",              4,  2.0,  5.00, 0.07, False),
@@ -133,6 +133,10 @@ def build_oil_network() -> nx.DiGraph:
         ("Suez Canal",   "USA",              9, 16.0,  2.00, 0.18, False),
         ("Cape of Good Hope", "Europe",     10, 16.0, 20.00, 0.02, False),
         ("Cape of Good Hope", "USA",        12, 19.0, 15.00, 0.02, False),
+        # Bypass completions (enable Hormuz-free paths to ALL consumers)
+        ("Cape of Good Hope", "India",       9, 16.0, 20.00, 0.02, False),
+        ("Cape of Good Hope", "Strait of Malacca", 10, 18.0, 16.60, 0.02, False),
+        ("Bab-el-Mandeb", "Indian Ocean Hub", 3, 4.5, 8.80, 0.35, False),
     ]
     for u, v, cost, time, cap, risk, hdep in edges:
         G.add_edge(u, v, cost=cost, time=time, capacity=cap,
@@ -335,7 +339,7 @@ def train_lstm(model: LSTMRiskPredictor, data: np.ndarray,
 # ──────────────────────────────────────────────────────────────────────────────
 class DQNNet(nn.Module):
     """
-    State  : one-hot node (N_NODES) + edge risks (N_EDGES)  → 41 dims
+    State  : one-hot node (N_NODES) + edge risks (N_EDGES)  → 43 dims
     Hidden : 256 → LayerNorm → ReLU → 128 → ReLU
     Output : Q-value per node (N_NODES)                      → 19 dims
     """
@@ -388,7 +392,7 @@ class DQNAgent:
         self.edges     = edge_list
         self.n_nodes   = len(node_list)
         self.n_edges   = len(edge_list)
-        self.state_dim = self.n_nodes + self.n_edges  # 19 + 22 = 41
+        self.state_dim = self.n_nodes + self.n_edges  # 19 + 24 = 43 (dynamic)
         self.n_actions = self.n_nodes
 
         self.policy = DQNNet(self.state_dim, self.n_actions)
@@ -1077,7 +1081,7 @@ with tab2:
     Replaces the OU simulation with a **trained sequence model**.
 
     ```
-    Input  : (batch, seq_len=10, n_edges=21, n_features=4)
+    Input  : (batch, seq_len=10, n_edges=24, n_features=4)
              features = [risk, oil_volatility, insurance_premium, sentiment]
     LSTM   : 128 hidden units, 2 layers, dropout 0.2
     Head   : Linear(128→64) → ReLU → Linear(64→21) → Sigmoid

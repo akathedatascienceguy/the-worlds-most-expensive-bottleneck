@@ -12,8 +12,8 @@ CHOKEPOINT CAPACITIES
   SUMED Pipeline:  2.5 MBD — EIA Red Sea Chokepoints analysis
 
 BYPASS PIPELINES
-  Saudi East-West (Petroline → Yanbu): 5 MBD capacity (7 MBD post-2026 upgrade)
-    — Fortune / Argus Media, March 2026; CEO Amin Nasser confirmation
+  Saudi East-West (Petroline → Yanbu): 7.0 MBD (upgraded March 2026)
+    — Fortune / Argus Media / CNBC, March 28 2026; CEO Amin Nasser confirmation
   UAE ADCO pipeline (Habshan → Fujairah): 1.5 MBD (expandable to 1.8)
     — Wikipedia / Global Energy Monitor / ADNOC, operational since June 2012
 
@@ -149,9 +149,10 @@ def build_oil_network() -> nx.DiGraph:
         ("Qatar",        "Hormuz",           1,  0.4,  0.51, 0.28, True),   # 0.51 MBD crude: Statista 2024
 
         # ── Bypass routes (Hormuz-free) ───────────────────────────────────────
-        # Saudi East-West Pipeline (Petroline): 5 MBD nameplate (Argus Media / Fortune 2026)
+        # Saudi East-West Pipeline (Petroline): 7.0 MBD post-March 2026 upgrade
+        # Fortune / Argus Media / CNBC, March 28 2026; CEO Amin Nasser confirmation
         # Pump station transit ~3 days; premium ~+25% vs tanker for same origin-dest pair
-        ("Saudi Arabia", "Yanbu",            6,  3.0,  5.00, 0.08, False),
+        ("Saudi Arabia", "Yanbu",            6,  3.0,  7.00, 0.08, False),
 
         # UAE ADCO pipeline Habshan→Fujairah: 1.5 MBD (ADNOC / Global Energy Monitor)
         # 360km onshore, ~1.5 days equivalent; low war-risk (onshore UAE)
@@ -168,7 +169,8 @@ def build_oil_network() -> nx.DiGraph:
 
         # ── Yanbu / Red Sea legs ──────────────────────────────────────────────
         # Yanbu loading → Red Sea: short coastal run ~1 day; SUMED parallel pipeline 2.5 MBD
-        ("Yanbu",        "Red Sea",          1,  1.0,  5.00, 0.09, False),
+        # Capacity matches upgraded Petroline throughput (7.0 MBD post-March 2026)
+        ("Yanbu",        "Red Sea",          1,  1.0,  7.00, 0.09, False),
 
         # Red Sea → Bab-el-Mandeb: ~700nm → ~2 days
         # Bab-el-Mandeb pre-Houthi throughput 8.8 MBD (EIA 2023)
