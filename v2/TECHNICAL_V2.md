@@ -43,7 +43,7 @@ The Q-table in v1 is a Python `defaultdict`. It stores Q-values only for (state,
 | Risk prediction | OU formula (no learning) | LSTM trained on structured synthetic data |
 | Q-function | Dict lookup (no generalisation) | Neural network (continuous state, interpolates) |
 | Training stability | None | Experience replay + target network |
-| State space | Discrete, exponential | Continuous, 41-dimensional |
+| State space | Discrete, exponential | Continuous, 43-dimensional |
 | Unseen states | Q = 0 (random fallback) | Forward pass through network (learned estimate) |
 
 ---
@@ -135,9 +135,9 @@ Val:    398 sequences (20%)
 ### 3.1 Architecture
 
 ```
-Input:  (B, SEQ_LEN=10, N_EDGES=21, N_FEATURES=4)
+Input:  (B, SEQ_LEN=10, N_EDGES=24, N_FEATURES=4)
         ↓ reshape
-        (B, 10, 96)              [flatten last two dims: 24 × 4]
+        (B, 10, 96)              [flatten last two dims: 24 × 4 = 96]
         ↓
 LSTM Layer 1:  input=96, hidden=128, dropout=0.2 on output
 LSTM Layer 2:  input=128, hidden=128
@@ -146,9 +146,9 @@ LSTM Layer 2:  input=128, hidden=128
         ↓
 Linear(128 → 64) → ReLU → Dropout(0.1)
         ↓
-Linear(64 → 21) → Sigmoid
+Linear(64 → 24) → Sigmoid
         ↓
-Output: (B, 21)    predicted r(e, t+1) ∈ (0, 1) for all edges
+Output: (B, 24)    predicted r(e, t+1) ∈ (0, 1) for all edges
 ```
 
 **Parameter count breakdown:**
@@ -200,7 +200,7 @@ Val loss closely tracks train loss, indicating no significant overfitting. The s
 
 ### 3.5 Live Inference
 
-At runtime, a **rolling window** of SEQ_LEN=10 recent observations is maintained in `st.session_state.risk_window` with shape `(10, 21, 4)`. On each simulation tick:
+At runtime, a **rolling window** of SEQ_LEN=10 recent observations is maintained in `st.session_state.risk_window` with shape `(10, 24, 4)`. On each simulation tick:
 
 ```python
 # 1. LSTM predicts next-step risks
@@ -211,7 +211,7 @@ for i, (u, v) in enumerate(edge_list):
     G[u][v]["risk"] = float(np.clip(pred[i], 0.0, 1.0))
 
 # 3. Append new row to window (constructed from updated graph state)
-new_row = np.zeros((1, 21, 4))
+new_row = np.zeros((1, 24, 4))
 for i, (u, v) in enumerate(edge_list):
     r = G[u][v]["risk"]
     new_row[0, i, 0] = r
@@ -233,7 +233,7 @@ Tabular Q-learning requires visiting every (state, action) pair to build accurat
 
 ```
 State = (current_node, risk_vector)
-      = 19 nodes × ℝ^21 (continuous risks)
+      = 19 nodes × ℝ^24 (continuous risks)
 ```
 
 In v1, risk was discretised to 5 bins, giving 19 × 5²¹ ≈ 9 × 10¹⁵ states. Training would need to visit a statistically significant fraction of these to generalise — computationally infeasible.
@@ -472,11 +472,11 @@ Soft updates (`θ⁻ ← τ·θ + (1-τ)·θ⁻`, typical τ ≈ 0.005) provide 
 │                                                         │
 │  1. Generate synthetic data                             │
 │     n_steps=2000, n_events=10, seed=42                  │
-│     → (2000, 21, 4) array                              │
+│     → (2000, 24, 4) array                              │
 │                                                         │
 │  2. Build LSTM sequences                                │
-│     X: (1989, 10, 21, 4)                               │
-│     y: (1989, 21)  [next-step risks]                   │
+│     X: (1989, 10, 24, 4)                               │
+│     y: (1989, 24)  [next-step risks]                   │
 │     80/20 train/val split                               │
 │                                                         │
 │  3. Train LSTM (120 epochs, Adam, MSE)                 │
@@ -501,7 +501,7 @@ Soft updates (`θ⁻ ← τ·θ + (1-τ)·θ⁻`, typical τ ≈ 0.005) provide 
 │  Input: rolling window W ∈ ℝ^(10 × 21 × 4)            │
 │                                                         │
 │  1. LSTM Risk Prediction                                │
-│     r̂ = sigmoid(LSTM(W)) ∈ ℝ^21                       │
+│     r̂ = sigmoid(LSTM(W)) ∈ ℝ^24                       │
 │     Update G[u][v]["risk"] ← r̂[i] for each edge       │
 │                                                         │
 │  2. Window Advance                                      │

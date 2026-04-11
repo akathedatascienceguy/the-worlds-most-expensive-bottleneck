@@ -223,8 +223,8 @@ The agent learns a policy — a mapping from (node, risk_conditions) → action 
 v2 replaces the lookup table with a **3-layer neural network**:
 
 ```
-Input:  one-hot(current node, 19 dims) + current risk vector (22 dims) = 41-dim state
-Hidden: Linear(41→256) + LayerNorm + ReLU + Dropout(0.1)
+Input:  one-hot(current node, 19 dims) + current risk vector (24 dims) = 43-dim state
+Hidden: Linear(43→256) + LayerNorm + ReLU + Dropout(0.1)
         Linear(256→128) + ReLU
 Output: Linear(128→19) = Q-value for each possible next node
 ```
