@@ -325,8 +325,14 @@ class QLearningAgent:
         risks = tuple(round(G[u][v]["risk"] * 4) / 4 for u, v in sorted(G.edges()))
         return (node, risks)
 
-    def _act(self, G: nx.DiGraph, node: str, exclude: set | None = None) -> str | None:
-        neighbors = [n for n in G.neighbors(node) if n not in (exclude or set())]
+    def _act(self, G: nx.DiGraph, node: str,
+             exclude: set | None = None, target: str | None = None) -> str | None:
+        neighbors = [
+            n for n in G.neighbors(node)
+            if n not in (exclude or set())
+            # never enter a consumer dead-end that isn't the destination
+            and (G.nodes[n].get("type") != "consumer" or n == target)
+        ]
         if not neighbors:
             return None
         if random.random() < self.epsilon:
@@ -352,7 +358,7 @@ class QLearningAgent:
         for _ in range(max_steps):
             if node == target:
                 break
-            action = self._act(G, node, exclude=seen)
+            action = self._act(G, node, exclude=seen, target=target)
             if action is None or not G.has_edge(node, action):
                 break
             e      = G[node][action]
