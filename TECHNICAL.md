@@ -18,6 +18,7 @@
 8. [Application Architecture](#8-application-architecture)
 9. [Data Flow End-to-End](#9-data-flow-end-to-end)
 10. [Limitations & Extensions](#10-limitations--extensions)
+11. [Concept Deep Dives](#11-concept-deep-dives)
 
 ---
 
@@ -692,6 +693,149 @@ Update prior per edge using conjugate Beta-Binomial model as signals arrive.
 **Survival analysis:**
 
 Model "time until disruption" as a survival function with hazard rate λ(t) driven by risk signals. This gives a disruption probability over a planning horizon rather than an instantaneous risk score.
+
+---
+
+---
+
+## 11. Concept Deep Dives
+
+This section explains the core mathematical ideas from first principles — intended for readers who want to understand *why* each model is built the way it is, not just what it does.
+
+### 11.1 Graph Theory & Network Representation
+
+**What is a graph?**
+
+A graph G = (V, E) is a set of nodes V connected by edges E. In this model:
+
+```
+Nodes V:   anything oil passes THROUGH
+           (countries, straits, pipeline terminals, ocean waypoints)
+
+Edges E:   directed connections between nodes
+           each edge e carries: cost · time · capacity · risk(t)
+```
+
+**Why directed?** Oil flows one way. A VLCC leaving Ras Tanura bound for Yokohama doesn't return through Hormuz on the same trip. The graph is directed because the logistics are asymmetric — different routes have different costs and risks depending on direction.
+
+**Betweenness Centrality — why Hormuz is a structural vulnerability:**
+
+Betweenness centrality measures how often node v appears on shortest paths between all other pairs:
+
+```
+C_B(v) = Σ_{s≠v≠t} σ_st(v) / σ_st
+```
+
+where σ_st = number of shortest paths from s to t, and σ_st(v) = those passing through v.
+
+A node with C_B → 1.0 is on *almost every* shortest path in the network. Remove it and the network fragments. Hormuz has the highest betweenness centrality in this graph — ~80% of producer-to-consumer shortest paths pass through it. No engineering fix (adding capacity, raising pipeline throughput) reduces this without building structurally parallel paths that bypass the node entirely.
+
+---
+
+### 11.2 Risk-Aware Dijkstra
+
+**Standard Dijkstra:** finds minimum-weight path in O((V+E) log V) using a min-heap priority queue. Always expands the cheapest reachable node next. Proven optimal for non-negative edge weights.
+
+**Our modification:** change the weight function only. Everything else is identical.
+
+```
+Standard:       w(e) = cost(e)
+Risk-aware:     w(e,t) = cost(e) + α·time(e) + λ·risk(e,t)
+```
+
+This is still a non-negative-weight shortest-path problem, so Dijkstra's optimality guarantee holds.
+
+**The λ switchover mechanism:**
+
+At low λ: Hormuz path cost < bypass path cost → Hormuz wins  
+At λ = λ*: both paths have equal weighted cost → indifferent  
+At λ > λ*: bypass weighted cost < Hormuz weighted cost → bypass wins  
+
+λ* is not set manually. It emerges from the current risk values on every edge. The Route Finder tab sweeps λ ∈ [0, 50] in 40 steps to reveal this frontier explicitly.
+
+**λ* as "the price of resilience":** the actual cost difference between the Hormuz path and the bypass path at λ* is what the market would need to offer to make safe routing economically rational under current risk conditions. Historically, shippers pay this only when forced.
+
+---
+
+### 11.3 Ornstein-Uhlenbeck Risk Simulation
+
+**Why risk must be modelled as a stochastic process:**
+
+Risk is not observable — it is inferred from signals (insurance premiums, news sentiment, AIS anomalies). It is not static — it evolves in response to geopolitical events. And it is mean-reverting — crises escalate and (usually) de-escalate back toward some baseline level.
+
+**The OU process:**
+
+```
+dR(t) = θ(μ - R(t))dt + σ dW(t)
+```
+
+| Term | Role |
+|------|------|
+| θ(μ - R(t))dt | Deterministic drift: pulls R toward μ proportional to distance |
+| σ dW(t) | Stochastic term: random shock, scaled by volatility σ |
+
+**Mean reversion intuition:** when R > μ (elevated risk), the drift term is negative — risk is pulled down. When R < μ (suppressed risk), drift is positive — risk is pulled up. The strength of the pull scales with θ. At θ=0 the process is a pure random walk.
+
+**Discrete-time Euler approximation (one tick):**
+
+```
+R(t+1) = R(t) + θ(μ - R(t)) + σ · ε
+where ε ~ N(0,1)
+```
+
+**Calibration:** μ = base_risk per edge, derived from Lloyd's/S&P war-risk insurance premium bands. σ = volatility × 0.12, where volatility is user-controlled (0 to 1). At volatility=0.30 (default), σ ≈ 0.036 per tick — consistent with real daily premium fluctuations during periods of moderate tension.
+
+**Crisis shock:** `apply_hormuz_crisis(G, severity)` bypasses the OU process and directly sets risk on all hormuz_dependent edges to `severity ± U(-0.05, 0.05)`. This models a sudden geopolitical event (e.g. an attack on tankers) that instantly reprices war-risk premiums.
+
+---
+
+### 11.4 Q-Learning: From Table to Policy
+
+**The limitation of Dijkstra:** it solves the current graph state optimally, but has no memory. Every time the graph changes (risk evolves), Dijkstra recomputes from scratch. It cannot generalise across states.
+
+**The MDP formulation:**
+
+```
+State  s:  (current_node, hormuz_risk_bucket)
+           19 possible nodes × 5 risk buckets = 95 reachable states
+
+Action a:  choose next node from unvisited neighbours
+           (non-target consumer nodes excluded to prevent dead-ends)
+
+Reward R:  -(cost + 10·risk + 2·time)   per edge traversed
+           + 50.0                         if action == target
+
+Discount γ = 0.9 (future rewards worth 90% of immediate rewards)
+```
+
+**The Q-function:** Q(s, a) estimates the *total expected future reward* from taking action a in state s, then following the optimal policy thereafter.
+
+**Bellman optimality equation:**
+
+```
+Q*(s,a) = R(s,a) + γ · max_{a'} Q*(s', a')
+```
+
+The optimal Q-function satisfies this self-consistency condition. Q-learning converges to Q* by iteratively applying:
+
+```
+Q(s,a) ← Q(s,a) + α [r + γ·max_{a'} Q(s',a') − Q(s,a)]
+```
+
+The bracket `[r + γ·max Q(s',a') − Q(s,a)]` is the **TD error** (temporal difference) — the "surprise" between what we expected and what we actually got. We nudge Q toward the target by fraction α.
+
+**Why training uses varied risk regimes:** training on a single risk level means the Q-table only has meaningful entries for one Hormuz risk bucket. The agent then gives identical paths regardless of current risk. Training cycles through four regimes (normal, elevated, crisis, recovery) so all 5 × 19 = 95 states accumulate real Q-values, and the greedy policy genuinely differs between normal and crisis conditions.
+
+**ε-greedy decay:**
+
+```
+ε(ep) = max(0.05, 0.5 × 0.994^ep)
+
+Episode  0:   ε = 0.50  (50% random exploration)
+Episode 100:  ε = 0.30
+Episode 300:  ε = 0.17
+Episode 600:  ε = 0.05  (5% residual exploration — never fully greedy)
+```
 
 ---
 

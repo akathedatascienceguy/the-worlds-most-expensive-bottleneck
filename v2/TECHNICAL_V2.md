@@ -21,6 +21,7 @@
 10. [Architecture Comparison: v1 vs v2](#10-architecture-comparison-v1-vs-v2)
 11. [Limitations & Next Steps](#11-limitations--next-steps)
 12. [Economic Cascade Model](#12-economic-cascade-model)
+13. [Concept Deep Dives](#13-concept-deep-dives)
 
 ---
 
@@ -989,5 +990,178 @@ These are consistent with IMF scenario analysis for major oil supply disruptions
 
 ---
 
+## 13. Concept Deep Dives
+
+This section provides self-contained explanations of every core model in v2, from first principles. For v1 concepts (graph theory, OU process, Dijkstra, Q-learning), see `TECHNICAL.md §11`.
+
+### 13.1 Why Q-Learning Breaks at Scale
+
+Tabular Q-learning stores one value per (state, action) pair. The state in v1 is `(current_node, hormuz_risk_bucket)` — 19 × 5 = 95 entries.
+
+Scale the state to include all 24 edge risks at 5 discretisation levels: 19 × 5²⁴ ≈ **60 trillion** theoretical states. In 600 training episodes of ≤30 steps each, the agent visits at most ~18,000 unique states — **0.00003%** of the space.
+
+At inference time, the agent hits unseen states where all Q-values are 0 (defaultdict). `max()` on equal values returns the first element by iteration order — a deterministic but meaningless choice. The result: identical paths every run, regardless of training.
+
+**The DQN solution:** replace the table with a neural network that *approximates* Q(s,a) and *interpolates* to unseen states. A state 1% different from a seen state produces a Q-value 1% different — not a cold "Q=0" fallback.
+
+---
+
+### 13.2 LSTM: Learning Temporal Structure in Risk Signals
+
+**The failure mode of OU:** every edge's risk is generated independently by its own OU process. There is no learning from the multi-signal structure of real geopolitical risk.
+
+In reality:
+- **Sentiment** is a *leading indicator* — news tension rises before markets reprice
+- **Insurance premiums** are *lagging* — Lloyd's reprices 5–10 days after incidents
+- **Oil volatility** is *concurrent* — price volatility co-moves with risk events
+
+A model that ignores these lag relationships cannot predict risk spikes — it can only react to them after they arrive. LSTM learns these relationships from data.
+
+**Architecture motivation:**
+
+The standard RNN suffers from **vanishing gradients** — errors from far-back timesteps diminish exponentially during backpropagation, so the model forgets long-range dependencies. LSTM solves this with **gated memory cells** that can hold information across arbitrarily long sequences.
+
+**The three gates:**
+
+```
+Forget gate:  f_t = σ(W_f · [h_{t-1}, x_t] + b_f)
+              "What fraction of old memory to erase?"
+
+Input gate:   i_t = σ(W_i · [h_{t-1}, x_t] + b_i)
+  New memory: c̃_t = tanh(W_c · [h_{t-1}, x_t] + b_c)
+              "What new information to store?"
+
+Cell update:  c_t = f_t ⊙ c_{t-1} + i_t ⊙ c̃_t
+              "Updated memory = (kept fraction) + (new fraction)"
+
+Output gate:  o_t = σ(W_o · [h_{t-1}, x_t] + b_o)
+  Hidden:     h_t = o_t ⊙ tanh(c_t)
+              "What to expose as the output this timestep?"
+```
+
+All σ are sigmoid functions ∈ (0,1). ⊙ is elementwise multiplication (Hadamard product).
+
+**Why this captures lags:** the forget gate can learn to *hold* insurance premium information for 7+ steps without decay, and the input gate can learn to *accept* sentiment signals at their correct predictive lead time. The cell state c_t is an information highway that bypasses the vanishing gradient problem.
+
+**BPTT (Backpropagation Through Time):** gradients flow backward through the unrolled sequence of length SEQ_LEN=10. Gradient clipping (max_norm=1.0) prevents exploding gradients on the Hormuz crisis disruption events injected into training data.
+
+---
+
+### 13.3 Deep Q-Network: Stable Neural RL
+
+**The naive approach and why it fails:**
+
+Directly training a neural network as a Q-function with online updates creates a feedback loop: the network generates targets, gets trained on them, generates new targets from the updated network — targets that shift every gradient step. This causes Q-values to oscillate or diverge.
+
+The two DQN innovations that solve this:
+
+**Experience Replay:**
+
+```
+Buffer B: circular deque of (s, a, r, s') transitions, capacity 10,000
+
+Problem without it:
+  Episode step 1: s₁ → a₁ → r₁ → s₁'
+  Episode step 2: s₂ → a₂ → r₂ → s₂'   (s₂ highly correlated with s₁)
+  Training on consecutive steps: correlated gradients → biased updates → oscillation
+
+Solution:
+  Store every transition in B.
+  Sample 64 transitions UNIFORMLY AT RANDOM from B.
+  → decorrelated mini-batch → stable gradient estimates
+```
+
+**Target Network:**
+
+```
+Two networks with identical architecture:
+  Policy net  Q_θ(s,a):   updated every gradient step
+  Target net  Q_θ⁻(s,a):  frozen, copied from Q_θ every 100 steps
+
+Bellman target uses Q_θ⁻:
+  y = r + γ · max_{a'} Q_θ⁻(s', a')
+
+Without target net: y changes every step (moving target)
+With target net:    y is stable for 100 steps → stable loss → stable gradients
+```
+
+**Loss function:**
+
+```
+L(θ) = E[(y - Q_θ(s,a))²]   MSE — sensitive to outlier TD errors
+
+Huber loss (used instead):
+         ½(y - Q)²           if |y - Q| ≤ 1
+L_δ =   {
+         |y - Q| - ½         otherwise
+
+Bounded gradient for large errors → stable training on crisis-regime outliers
+```
+
+**Action masking:** before argmax, Q-values for non-neighbouring nodes are set to −∞:
+
+```python
+mask = torch.full((n_actions,), float('-inf'))
+mask[valid_action_indices] = 0.0
+q_values = q_values + mask
+action = q_values.argmax().item()
+```
+
+This ensures the agent never selects a node it cannot actually reach from the current position.
+
+---
+
+### 13.4 Economic Cascade: Macro Transmission Mechanics
+
+**Why routing alone is insufficient:**
+
+Knowing the optimal tanker route tells you the *logistics cost* of a disruption. It does not tell you whether the disruption triggers a global recession, food crisis, or interest rate cycle. The Economic Cascade model answers the second question.
+
+**Five transmission mechanisms in sequence:**
+
+```
+① Supply shock
+   supply_cut_mbd = hormuz_risk × 20.0 MBD
+   duration_multiplier: 3.5× (≤7d), 5.5× (≤30d), 8.0× (≤90d), 12.0× (>90d)
+
+② Oil price
+   ΔP_oil = supply_cut/global_supply × duration_multiplier
+           - OPEC_offset (max 0.35 × cut, capped at 7% global)
+           - SPR_offset  (declining with duration)
+           + panic_premium (max(0, (risk - 0.5) × 0.40))
+
+③ Freight premium
+   Δfreight% = (extra_days / normal_days) × 0.15 × oil_price_factor
+   where extra_days is route lengthening from Hormuz closure
+
+④ Regional CPI (IMF WP/17/53 pass-through)
+   headline_cpi[r] = ΔP_oil × pass_through_coeff[r] × import_dep[r]
+   
+   food_cpi[r]     = energy_to_food + fertilizer_cost
+                   + freight_to_food + panic_food_buying
+
+⑤ GDP impact
+   gdp_impact[r] = direct_energy_drag + monetary_drag
+   where monetary_drag = -0.15 × max(0, headline_cpi - 2.0)
+                         (central bank rate hike effect)
+```
+
+**Why regional heterogeneity matters:**
+
+The same oil price shock produces a 0.08 pp CPI pass-through in the USA (15% import dependency, deep strategic reserves) and 0.22 pp in Developing Markets (80% import dependency, no SPR, food-energy poor households). The GDP elasticity is 4× larger for India than for the USA. A Hormuz closure is not a uniform global event — it is a geographically structured crisis with winners (domestic producers), moderate losers (Europe), and severe losers (East Asia, India, Developing Markets).
+
+**Monte Carlo tail risk:**
+
+500 independent scenarios are drawn from:
+- Severity ~ Uniform(0.30, 0.95)
+- Duration ~ Uniform choice from {3, 7, 14, 30, 60, 90, 180} days
+
+Each scenario runs the full cascade across all 5 regions. The output distributions quantify:
+- **Median outcome:** the central expectation for planning
+- **95th percentile:** the tail scenario that risk managers should design for
+- **Probability of exceeding historical baselines:** validated against 7 real events
+
+---
+
 *End of v2 Technical Report*  
-*See also: `TECHNICAL.md` (v1 baseline), `DATA_SOURCES.md` (real data citations)*
+*See also: `TECHNICAL.md` (v1 baseline + §11 concept deep dives), `DATA_SOURCES.md` (real data citations)*

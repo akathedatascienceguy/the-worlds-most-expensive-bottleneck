@@ -322,8 +322,14 @@ class QLearningAgent:
         self.Q: dict = defaultdict(float)
 
     def _state(self, G: nx.DiGraph, node: str) -> tuple:
-        risks = tuple(round(G[u][v]["risk"] * 4) / 4 for u, v in sorted(G.edges()))
-        return (node, risks)
+        # Compact state: node + global Hormuz risk bucket (5 levels: 0/0.25/0.5/0.75/1.0)
+        # Gives 19×5 = 95 reachable states — fully explorable in a few hundred episodes.
+        # Full 24-edge encoding (5^24 states) is never covered and produces identical
+        # greedy paths every run due to universal Q=0 tie-breaking.
+        hormuz_risks = [G[u][v]["risk"] for u, v in G.edges()
+                        if G[u][v].get("hormuz_dependent")]
+        avg = float(np.mean(hormuz_risks)) if hormuz_risks else 0.0
+        return (node, round(avg * 4) / 4)
 
     def _act(self, G: nx.DiGraph, node: str,
              exclude: set | None = None, target: str | None = None) -> str | None:
@@ -337,8 +343,12 @@ class QLearningAgent:
             return None
         if random.random() < self.epsilon:
             return random.choice(neighbors)
-        state = self._state(G, node)
-        return max(neighbors, key=lambda a: self.Q[(state, a)])
+        state  = self._state(G, node)
+        q_vals = [self.Q[(state, a)] for a in neighbors]
+        max_q  = max(q_vals)
+        # random tie-break so equal-Q neighbors don't always resolve to same node
+        best   = [n for n, q in zip(neighbors, q_vals) if q == max_q]
+        return random.choice(best)
 
     def _update(self, G: nx.DiGraph, s: str, action: str, reward: float, ns: str) -> None:
         state      = self._state(G, s)
@@ -375,9 +385,31 @@ class QLearningAgent:
     def train(self, G: nx.DiGraph, source: str, target: str,
               episodes: int = 300) -> list[float]:
         rewards = []
-        for _ in range(episodes):
+        edges = list(G.edges())
+        for ep in range(episodes):
             self.epsilon = max(0.05, self.epsilon * 0.994)
+            # Perturb risks each episode so the agent trains across all
+            # Hormuz risk buckets (low/medium/high/crisis), not just base risk.
+            # Without this every episode sees the same state → Q-table has
+            # identical entries → greedy path always matches Dijkstra.
+            saved = {(u, v): G[u][v]["risk"] for u, v in edges}
+            # Cycle through risk regimes: normal → elevated → crisis → recovery
+            phase = (ep % 4)
+            for u, v in edges:
+                base = G[u][v]["base_risk"]
+                hdep = G[u][v].get("hormuz_dependent", False)
+                if phase == 0:   # normal
+                    G[u][v]["risk"] = float(np.clip(base + np.random.normal(0, 0.05), 0, 1))
+                elif phase == 1: # elevated tension
+                    bump = 0.30 if hdep else 0.05
+                    G[u][v]["risk"] = float(np.clip(base + bump + np.random.normal(0, 0.05), 0, 1))
+                elif phase == 2: # crisis
+                    G[u][v]["risk"] = float(np.clip((0.85 if hdep else base) + np.random.normal(0, 0.05), 0, 1))
+                else:            # recovery
+                    G[u][v]["risk"] = float(np.clip(base + 0.10 + np.random.normal(0, 0.08), 0, 1))
             _, r = self._episode(G, source, target)
+            for u, v in edges:  # restore original risks
+                G[u][v]["risk"] = saved[(u, v)]
             rewards.append(r)
         return rewards
 
@@ -589,12 +621,13 @@ st.markdown("---")
 # TABS
 # ──────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🗺️ Network Map",
     "🛣️ Route Finder",
     "📡 Risk Simulator",
     "🔥 Stress Test",
     "🤖 RL Agent",
+    "📖 How It Works",
 ])
 
 
@@ -967,43 +1000,289 @@ with tab5:
     if st.session_state.rl_agent:
         st.markdown("---")
         st.markdown("### Learned Policy vs Dijkstra")
+        st.markdown("""
+        The comparison is shown across **two scenarios**. Under normal conditions both methods
+        often agree — that's expected. The difference emerges under crisis, where the RL agent
+        uses a *pre-learned policy* for the high-risk regime it trained on, while Dijkstra
+        recomputes from scratch on the degraded graph.
+        """)
 
-        agent     = st.session_state.rl_agent
-        rl_path   = agent.greedy_path(G, source, target)
-        _, d_path = risk_dijkstra(G, source, target, alpha, lam)
+        agent = st.session_state.rl_agent
+
+        # ── Scenario A: current live graph (normal / stepped) ─────────────────
+        st.markdown("#### Scenario A — Current Graph State (normal conditions)")
+        rl_path_n   = agent.greedy_path(G, source, target)
+        _, d_path_n = risk_dijkstra(G, source, target, alpha, lam)
 
         col_r1, col_r2 = st.columns(2)
         with col_r1:
-            st.markdown("#### 🤖 RL Agent (learned policy)")
-            st.code(" → ".join(rl_path) if rl_path else "No path found")
-            rl_s = path_stats(G, rl_path)
-            for k, v in rl_s.items():
+            st.markdown("**🤖 RL Agent**")
+            st.code(" → ".join(rl_path_n) if rl_path_n else "No path found")
+            for k, v in path_stats(G, rl_path_n).items():
                 st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
         with col_r2:
-            st.markdown("#### 🗺️ Dijkstra (single-shot optimal)")
-            st.code(" → ".join(d_path) if d_path else "No path found")
-            d_s = path_stats(G, d_path)
-            for k, v in d_s.items():
+            st.markdown("**🗺️ Dijkstra**")
+            st.code(" → ".join(d_path_n) if d_path_n else "No path found")
+            for k, v in path_stats(G, d_path_n).items():
                 st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
 
-        col_map_rl, col_map_dijk = st.columns(2)
-        with col_map_rl:
-            st.plotly_chart(draw_network(G, path=rl_path,  title="RL Agent Route"),
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.plotly_chart(draw_network(G, path=rl_path_n, title="RL — Normal"),
                             use_container_width=True)
-        with col_map_dijk:
-            st.plotly_chart(draw_network(G, path=d_path, title="Dijkstra Route"),
+        with col_m2:
+            st.plotly_chart(draw_network(G, path=d_path_n, title="Dijkstra — Normal"),
+                            use_container_width=True)
+
+        # ── Scenario B: Hormuz crisis on a fresh graph ────────────────────────
+        st.markdown("---")
+        st.markdown("#### Scenario B — Hormuz Crisis (severity 0.90)")
+        st.caption("Fresh graph with crisis applied — neither method has seen this exact state before. "
+                   "RL uses its pre-trained crisis-regime policy; Dijkstra recomputes optimally.")
+
+        G_crisis = build_oil_network()
+        apply_hormuz_crisis(G_crisis, severity=0.90)
+
+        rl_path_c   = agent.greedy_path(G_crisis, source, target)
+        _, d_path_c = risk_dijkstra(G_crisis, source, target, alpha, lam)
+
+        same = (rl_path_c == d_path_c)
+        if same:
+            st.info("🤝 Both methods chose the same bypass route under crisis — "
+                    "the agent's learned policy matches Dijkstra's optimal solution.")
+        else:
+            st.success("✅ Crisis reveals the difference: RL and Dijkstra diverge on routing strategy.")
+
+        col_r3, col_r4 = st.columns(2)
+        with col_r3:
+            st.markdown("**🤖 RL Agent**")
+            st.code(" → ".join(rl_path_c) if rl_path_c else "No path found")
+            rl_cs = path_stats(G_crisis, rl_path_c)
+            for k, v in rl_cs.items():
+                st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
+        with col_r4:
+            st.markdown("**🗺️ Dijkstra**")
+            st.code(" → ".join(d_path_c) if d_path_c else "No path found")
+            d_cs = path_stats(G_crisis, d_path_c)
+            dij_rl = path_stats(G_crisis, rl_path_c)
+            for k, v in d_cs.items():
+                bv = dij_rl.get(k)
+                if k == "Hormuz Exposed":
+                    st.metric(k, "⚠️ YES" if v else "✅ NO")
+                elif isinstance(bv, (int, float)) and isinstance(v, (int, float)):
+                    st.metric(k, str(v), delta=round(v - bv, 2),
+                              delta_color="inverse" if k in ("Cost", "Transit (days)", "Max Risk", "Avg Risk") else "normal")
+                else:
+                    st.metric(k, str(v))
+
+        col_m3, col_m4 = st.columns(2)
+        with col_m3:
+            st.plotly_chart(draw_network(G_crisis, path=rl_path_c, title="RL — Crisis"),
+                            use_container_width=True)
+        with col_m4:
+            st.plotly_chart(draw_network(G_crisis, path=d_path_c, title="Dijkstra — Crisis"),
                             use_container_width=True)
 
         st.info("""
-        💡 **Why RL matters beyond Dijkstra:**
-        The Q-learning agent stores a *generalised policy* — it doesn't re-solve the graph each time.
-        In a real deployment it could make near-instant rerouting decisions as new risk signals arrive,
-        without running a full graph search. It also naturally discovers routes that balance cost,
-        risk, and time through experience rather than through a hand-tuned objective function.
+        💡 **The key difference is not the path — it's the mechanism.**
+        Dijkstra recomputes from scratch every time the graph changes (O((V+E) log V) per query).
+        The RL agent does a single Q-table lookup — instant, regardless of graph size.
+        In a real deployment with continuous risk updates, that lookup speed is the advantage.
+        The agent also learned its crisis-regime policy *without* being told λ — it discovered
+        the cost-risk tradeoff purely through reward signals.
         """)
 
     else:
         st.info("👆 Train the agent first to compare it against Dijkstra.")
+
+
+# ── TAB 6 · HOW IT WORKS ─────────────────────────────────────────────────────
+with tab6:
+    st.markdown("## 📖 How It Works — Concept Guide")
+    st.markdown(
+        "Every model in this app is grounded in a specific mathematical idea. "
+        "This tab explains each one from first principles — no prerequisites needed."
+    )
+
+    # ── 1. The Graph ──────────────────────────────────────────────────────────
+    with st.expander("🌐 The Oil Network as a Graph  G = (V, E)", expanded=True):
+        st.markdown("""
+**The core idea:** strip away the geopolitics and describe the oil supply chain the way a mathematician would — as a *graph*.
+
+A graph has two ingredients:
+- **Nodes (V):** anything that oil passes *through* — a country, a strait, a pipeline terminal
+- **Edges (E):** the connections between them — shipping lanes and pipelines
+
+```
+Producers  →  Chokepoints  →  Transit Hubs  →  Consumers
+Saudi Arabia     Hormuz       Indian Ocean      China
+UAE              Malacca      Red Sea           Japan
+Iraq             Suez Canal   Cape of GH        Europe
+```
+
+Each edge carries four numbers that matter:
+
+| Attribute | What it means |
+|-----------|--------------|
+| `cost` | Shipping cost index (proportional to real VLCC freight rates) |
+| `time` | Transit days (derived from nautical miles ÷ 14 knots) |
+| `capacity` | Max throughput in million barrels/day (real EIA figures) |
+| `risk(t)` | Current geopolitical risk — *this one changes over time* |
+
+The routing problem: find the path from producer to consumer that minimises total cost+time+risk.
+        """)
+
+    # ── 2. Dijkstra ──────────────────────────────────────────────────────────
+    with st.expander("🗺️ Dijkstra's Algorithm — The GPS of Graphs"):
+        st.markdown("""
+**Analogy:** Dijkstra is like a GPS that always finds the fastest route — except instead of
+*time*, we minimise a custom edge weight that combines cost, transit time, and risk.
+
+**How it works (step by step):**
+
+```
+1. Start at the source node. Distance = 0.
+2. Push (distance=0, node=source) into a priority queue.
+3. Pop the lowest-distance item from the queue.
+4. For each unvisited neighbour:
+      new_dist = current_dist + edge_weight(current → neighbour)
+      if new_dist < known_dist[neighbour]:
+          update known_dist[neighbour] = new_dist
+          push (new_dist, neighbour) into queue
+5. Repeat until you reach the destination.
+```
+
+**Why a priority queue?** It ensures we always explore the *cheapest reachable node next*,
+which guarantees the first time we reach a node, we've found the cheapest path to it.
+
+**Complexity:** O((V + E) log V) — fast enough to recompute in milliseconds on our 19-node graph.
+
+**The standard version** minimises raw shipping cost. Our version adds *time* and *risk*:
+
+```python
+def edge_weight(G, u, v, alpha=0.5, lam=10.0):
+    e = G[u][v]
+    return e["cost"] + alpha * e["time"] + lam * e["risk"]
+```
+
+**The λ effect:** At λ=0 the algorithm ignores risk entirely and picks the cheapest route
+(always Hormuz). As λ increases, the risk penalty on Hormuz edges grows until it outweighs
+the cost saving — at that threshold the algorithm *switches* to a bypass route. That cost
+jump is the **price of resilience**.
+        """)
+
+    # ── 3. OU Process ─────────────────────────────────────────────────────────
+    with st.expander("📡 Ornstein-Uhlenbeck Process — How Risk Evolves"):
+        st.markdown(r"""
+**Analogy:** Imagine a rubber band stretched between your hand and a wall. Let go — it snaps
+back toward the wall. That "snapping back" is mean reversion. Now add random gusts of wind
+that push it in unpredictable directions. That's the OU process.
+
+**The equation:**
+
+$$dR(t) = \theta(\mu - R(t))\,dt + \sigma\,dW(t)$$
+
+| Symbol | Meaning | Value |
+|--------|---------|-------|
+| $R(t)$ | Current risk level | changes each tick |
+| $\theta$ | Mean reversion speed — how fast risk returns to baseline | 0.3 |
+| $\mu$ | Long-run baseline risk (the "wall") | calibrated per edge |
+| $\sigma$ | Volatility — how strong the random shocks are | 0.12 × slider |
+| $dW(t)$ | Wiener process — pure random shock drawn from N(0,1) | random |
+
+**Why OU and not a random walk?**
+
+A random walk drifts forever — risk would eventually reach 0 or 1 and stay there.
+The OU process always pulls back toward baseline: crises happen, escalate, then
+*de-escalate* (usually). This mirrors real geopolitical risk dynamics.
+
+**Discrete implementation (one simulation tick):**
+
+```python
+new_risk = current + θ(μ - current) + σ · N(0,1)
+new_risk = clip(new_risk, 0, 1)
+```
+
+The **Volatility slider** in the sidebar scales σ. At 0 the graph is static.
+At 1.0 risk swings wildly every tick. Real-world volatility sits around 0.3–0.5
+during periods of elevated tension.
+        """)
+
+    # ── 4. Q-Learning ─────────────────────────────────────────────────────────
+    with st.expander("🤖 Q-Learning — Teaching an Agent to Route"):
+        st.markdown(r"""
+**Analogy:** Imagine learning to drive in a city you've never seen. At first you turn randomly.
+Over time you learn which turns lead to fast routes and which lead to dead ends. You don't
+memorise a single path — you build an *intuition* (a policy) for every intersection you might face.
+That's Q-learning.
+
+**The MDP setup:**
+
+| Component | Definition |
+|-----------|-----------|
+| **State** $s$ | Where the agent is + current Hormuz risk level |
+| **Action** $a$ | Which node to move to next |
+| **Reward** $R$ | $-(cost + 10 \cdot risk + 2 \cdot time)$ + 50 if reached target |
+| **Goal** | Maximise total reward across the journey |
+
+**The Q-function:** $Q(s, a)$ = "how good is it to take action $a$ from state $s$?"
+
+After taking action $a$, moving to state $s'$, and getting reward $r$, we update:
+
+$$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
+
+| Symbol | Meaning |
+|--------|---------|
+| $\alpha$ | Learning rate — how much to shift toward new information (0.15) |
+| $\gamma$ | Discount factor — how much to value future vs immediate rewards (0.9) |
+| $r + \gamma \max Q(s',a')$ | Bellman target — what Q *should* be |
+| The bracket | TD error — the surprise, used to nudge Q toward the target |
+
+**Exploration vs exploitation (ε-greedy):**
+
+```
+With probability ε  → take a RANDOM action (explore)
+With probability 1-ε → take the BEST KNOWN action (exploit)
+```
+
+ε starts at 0.5 (50% random) and decays to 0.05 as training progresses.
+This ensures the agent explores the graph before committing to a fixed route.
+
+**What the agent learns:** not a single path, but a *policy table* — a lookup that
+maps (node, risk_level) → best_next_node. At inference time, routing is a table
+lookup, not a graph search.
+        """)
+
+    # ── 5. Betweenness Centrality ──────────────────────────────────────────────
+    with st.expander("🔴 Why Hormuz is a Single Point of Failure — Betweenness Centrality"):
+        st.markdown("""
+**Betweenness centrality** measures how often a node appears on the shortest path
+between *every pair* of other nodes in the network.
+
+$$C_B(v) = \\sum_{s \\neq v \\neq t} \\frac{\\sigma_{st}(v)}{\\sigma_{st}}$$
+
+where $\\sigma_{st}$ = total shortest paths from $s$ to $t$, and $\\sigma_{st}(v)$ =
+those that pass through $v$.
+
+**Hormuz in numbers:** Remove the Hormuz node. The shortest-path count between Gulf
+producers and Asian consumers drops by ~80%. No other node comes close.
+
+**What this means practically:**
+- It's not just that Hormuz is busy — it's that the *structure* of the network makes it unavoidable
+- Even if you want to avoid Hormuz, the bypass routes are longer, costlier, and lower-capacity
+- This is why the λ-switchover in the Route Finder requires a large risk penalty to trigger —
+  the bypass is economically irrational under normal conditions
+
+**The engineering lesson:** high betweenness centrality = high systemic risk. A node with
+CB close to 1.0 is a choke the whole network depends on. Redundancy means building
+*parallel paths* that reduce betweenness, not just adding capacity to the bottleneck itself.
+        """)
+
+    st.markdown("---")
+    st.info(
+        "📘 For full implementation details, equations, and data sources: "
+        "see `TECHNICAL.md`, `blog.md`, and `DATA_SOURCES.md` in the repository."
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

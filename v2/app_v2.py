@@ -1049,13 +1049,14 @@ st.markdown("---")
 # ──────────────────────────────────────────────────────────────────────────────
 # TABS
 # ──────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🗺️ Network",
     "🧠 LSTM Risk Engine",
     "🤖 DQN Agent",
     "🔥 Stress Test",
     "🔬 Model Internals",
     "📉 Economic Cascade",
+    "📖 How It Works",
 ])
 
 
@@ -1857,6 +1858,239 @@ with tab6:
     IEA Emergency Response Manual — strategic reserve offsets ·
     EIA — Hormuz throughput share, historical events data
     """)
+
+
+# ── TAB 7 · HOW IT WORKS ─────────────────────────────────────────────────────
+with tab7:
+    st.markdown("## 📖 How It Works — Concept Guide")
+    st.markdown(
+        "v2 introduces two trained models on top of the v1 graph and routing engine. "
+        "This tab explains every core concept from first principles."
+    )
+
+    with st.expander("🌐  The Oil Network as a Graph  G = (V, E)", expanded=True):
+        st.markdown("""
+**Strip away the geopolitics.** Oil flowing from the Persian Gulf to Tokyo is a *flow
+on a directed graph*: nodes are ports and chokepoints, edges are shipping lanes and
+pipelines, each labelled with cost, transit time, capacity, and a time-varying risk score.
+
+```
+Producers ──► Hormuz ──► Indian Ocean Hub ──► Malacca ──► China / Japan
+                │                │
+                │                └──► India
+                └──► (bypass)  Fujairah / Yanbu ──► Red Sea ──► Suez ──► Europe
+```
+
+The routing objective is not "cheapest path" — it's **minimum risk-adjusted cost**:
+
+```
+w(e, t) = cost(e) + α·time(e) + λ·risk(e, t)
+```
+
+Raise λ and the algorithm penalises risky edges more heavily until it switches from
+Hormuz to a bypass. That cost jump at the switchover = **the market price of resilience**.
+        """)
+
+    with st.expander("🗺️  Risk-Aware Dijkstra — GPS for a Dangerous Graph"):
+        st.markdown(r"""
+Standard Dijkstra finds the minimum-weight path in O((V+E) log V). We use it unchanged —
+the only modification is the **weight function**:
+
+$$w(e,t) = c(e) + \alpha \cdot t(e) + \lambda \cdot r(e,t)$$
+
+The priority queue always pops the lowest accumulated weight, so the algorithm is
+guaranteed to find the global minimum of this combined objective.
+
+**Why this works for risk:** risk is just another additive cost. A risky edge becomes
+expensive when λ is large, so Dijkstra naturally routes around it — exactly like a
+GPS routing around a road with a reported incident.
+
+**The λ switchover:** at low λ, Hormuz wins (cheapest). At a critical λ*, the risk
+penalty on Hormuz edges exceeds the cost advantage of bypass routes. Above λ*: bypass wins.
+This threshold is not set by hand — it *emerges* from the graph structure and current risk values.
+        """)
+
+    with st.expander("📡  Ornstein-Uhlenbeck Process — Risk as a Rubber Band"):
+        st.markdown(r"""
+**The intuition:** stretch a rubber band between your hand and a fixed point on a wall.
+Let go. It snaps back. Now add random gusts of wind. The band wanders but always returns
+toward the anchor. That anchor is `base_risk`. The gusts are geopolitical shocks.
+
+**The SDE:**
+
+$$dR(t) = \underbrace{\theta(\mu - R(t))}_{\text{pull back to baseline}}\,dt + \underbrace{\sigma\,dW(t)}_{\text{random shock}}$$
+
+| Symbol | Meaning |
+|--------|---------|
+| $\theta = 0.3$ | Reversion speed — stronger pull = faster de-escalation |
+| $\mu$ | Baseline risk per edge (calibrated to Lloyd's insurance premiums) |
+| $\sigma$ | Volatility — scales the shock magnitude |
+| $dW(t)$ | Wiener increment — pure random noise, N(0,1) per tick |
+
+**Why not a random walk?** A random walk drifts to 0 or 1 permanently. OU reverts —
+crises de-escalate. This is empirically correct: even the 2023 Houthi crisis, which
+sent Bab-el-Mandeb premiums to 2,700% of baseline, partially unwound over 12 months.
+
+In v1, OU *generates* risk. In v2, LSTM *predicts* it from signals.
+        """)
+
+    with st.expander("🧠  LSTM — Teaching a Network to Feel the Tension Coming"):
+        st.markdown(r"""
+**The problem with OU:** it treats every timestep as independent of the past. In reality,
+rising insurance premiums *lag* geopolitical tension by days. News sentiment *leads* it.
+Oil price volatility is *concurrent*. A model that ignores this structure misses the
+early-warning signal that lets a router pre-empt a risk spike.
+
+**LSTM (Long Short-Term Memory)** is a recurrent neural network designed to learn these
+temporal patterns from sequences.
+
+**Architecture:**
+
+```
+Input window: last 10 timesteps × 24 edges × 4 signals
+              └─ risk, oil_vol, insurance_premium, sentiment
+
+Reshape  →  (batch, 10, 96)   [flatten edge×signal dims]
+   │
+LSTM Layer 1  (input=96, hidden=128, dropout=0.2)
+   │           learns: which signals matter, at what lag
+LSTM Layer 2  (input=128, hidden=128)
+   │           learns: higher-order temporal patterns
+Last hidden state  →  (batch, 128)
+   │
+Linear(128→64) + ReLU + Dropout(0.1)
+   │
+Linear(64→24) + Sigmoid
+   │
+Output: predicted r̂(e, t+1) ∈ (0,1) for all 24 edges simultaneously
+```
+
+**The three gates inside each LSTM cell:**
+
+| Gate | Function |
+|------|---------|
+| **Forget gate** $f_t = \sigma(W_f \cdot [h_{t-1}, x_t] + b_f)$ | Decides what to discard from memory |
+| **Input gate** $i_t = \sigma(W_i \cdot [h_{t-1}, x_t] + b_i)$ | Decides what new info to store |
+| **Output gate** $o_t = \sigma(W_o \cdot [h_{t-1}, x_t] + b_o)$ | Decides what to expose as hidden state |
+
+**Why this matters for routing:** when the LSTM sees sentiment drop before insurance
+reprices, it predicts rising risk on Hormuz-dependent edges *7 steps ahead*. The router
+then pre-commits to bypass routes before the market has even priced in the tension.
+That's the operational advantage over reactive OU-based routing.
+
+**Training:** MSE loss on next-step risk, Adam optimiser (lr=1e-3),
+ReduceLROnPlateau scheduler, 80/20 train/val split, gradient clipping max_norm=1.0.
+        """)
+
+    with st.expander("🤖  Deep Q-Network — From Lookup Table to Neural Policy"):
+        st.markdown(r"""
+**Why Q-learning isn't enough:** tabular Q-learning stores one entry per (state, action) pair.
+With 24 edges and risk discretised to 5 levels, the theoretical state space is 19 × 5²⁴ ≈ 60 trillion states.
+No amount of training covers this. The agent encounters unseen states at inference time
+and falls back to Q=0 for all actions — effectively random.
+
+**DQN replaces the table with a neural network** that *approximates* Q(s,a) and
+*generalises* to unseen states via interpolation.
+
+**Architecture:**
+
+```
+State:  one-hot(current node, 19) + LSTM risk vector (24) = 43 dims
+   │
+Linear(43 → 256) + LayerNorm(256) + ReLU + Dropout(0.1)
+   │
+Linear(256 → 128) + ReLU
+   │
+Linear(128 → 19)
+   │
+Q-values for all 19 possible next nodes
+```
+
+**Bellman update with neural network:**
+
+$$\mathcal{L} = \mathbb{E}\Big[\big(r + \gamma \max_{a'} Q_{\text{target}}(s',a') - Q_{\text{policy}}(s,a)\big)^2\Big]$$
+
+Minimised with Adam (lr=1e-4) and **Huber loss** (less sensitive to outlier TD errors than MSE).
+
+**Two stabilisation tricks that make DQN trainable:**
+
+**1. Experience Replay Buffer (capacity 10,000):**
+Without it, consecutive training samples are highly correlated (same route, adjacent timesteps).
+Correlated updates cause oscillating Q-values. The replay buffer stores past transitions
+and samples them *uniformly at random* — breaking temporal correlation.
+
+```
+Buffer: [(s₁,a₁,r₁,s₁'), (s₂,a₂,r₂,s₂'), ..., (s₁₀₀₀₀, ...)]
+Training batch: 64 transitions sampled randomly from buffer
+```
+
+**2. Target Network (synced every 100 gradient steps):**
+If the network used to generate Bellman targets is the *same* network being trained,
+the targets move every step — like trying to hit a moving bullseye. We freeze a copy
+(the "target network") and only update it every 100 steps.
+
+```
+Q_target  ←  Q_policy   (hard copy every 100 gradient steps)
+Q_policy  ←  trained continuously with gradient descent
+```
+
+**Action masking:** Q-values for non-neighbouring nodes are set to −∞ before argmax.
+The agent can never "teleport" to a non-adjacent node.
+
+**ε-greedy decay:**  ε = 1.0 → 0.05 at rate 0.997/episode.
+Early episodes: mostly random exploration. Late episodes: mostly exploitation of learned Q-values.
+        """)
+
+    with st.expander("📉  Economic Cascade — How a Strait Closing Moves Inflation"):
+        st.markdown(r"""
+A Hormuz closure doesn't just reroute tankers — it triggers a chain of macro effects
+that propagate through the global economy over 6 months.
+
+**The transmission chain:**
+
+```
+Hormuz closure
+    ↓  (immediate)
+Supply cut (MBD) × duration multiplier → Oil price spike
+    ↓  (days 0–7)
+Freight premium (tankers rerouting adds 10–34 days)
+    ↓  (days 7–30)
+Energy & manufacturing costs rise
+    ↓  (days 30–45)
+Headline CPI — regional pass-through coefficients (IMF WP/17/53)
+    ↓  (days 45–60)
+Food prices — fertilizer, freight-to-food, panic premium
+    ↓  (days 60–90)
+Central bank rate hikes
+    ↓  (days 90–180)
+GDP contraction (direct energy drag + monetary tightening drag)
+```
+
+**Regional heterogeneity** — why East Asia hurts more than the USA:
+
+| Region | Import Dependency | CPI Pass-Through | GDP Elasticity |
+|--------|-----------------|------------------|---------------|
+| East Asia | 85% | 0.18 | −0.040 per % oil chg |
+| India | 85% | 0.16 | −0.050 |
+| Europe | 55% | 0.13 | −0.028 |
+| USA | 15% | 0.08 | −0.015 |
+| Dev. Markets | 80% | 0.22 | −0.060 |
+
+**Calibration:** coefficients are validated against 7 historical disruptions
+(1973 Arab Embargo through 2024 Houthi/Red Sea attacks). The model correctly
+reproduces the 1973 GDP shock (−2.5%) and the 2019 Abqaiq blip (−0.1%) within ±20%.
+
+**Monte Carlo:** 500 scenarios with severity ~ U(0.30, 0.95) and duration drawn from
+{3, 7, 14, 30, 60, 90, 180} days. The output distributions quantify *tail risk* —
+the 95th percentile outcomes that planners should design for, not the median.
+        """)
+
+    st.markdown("---")
+    st.info(
+        "📘 Full implementation details: `v2/TECHNICAL_V2.md` · "
+        "Real data citations: `DATA_SOURCES.md` · "
+        "Narrative: `blog.md`"
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
