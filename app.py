@@ -215,6 +215,21 @@ def build_oil_network() -> nx.DiGraph:
 
         # Cape → US Gulf: additional ~4,500nm beyond Cape-Europe → ~3 more days
         ("Cape of Good Hope", "USA",        12, 19.0, 15.00, 0.02, False),
+
+        # Cape → India: Cape Town to Mumbai ~5,200nm → ~16 days (open Indian Ocean)
+        # Used when Hormuz is blocked; low risk, high cost due to extra distance
+        ("Cape of Good Hope", "India",       9, 16.0, 20.00, 0.02, False),
+
+        # Cape → Strait of Malacca: Cape to Malacca ~5,800nm → ~18 days
+        # Extreme bypass for China/Japan when both Hormuz and Red Sea routes are high-risk
+        ("Cape of Good Hope", "Strait of Malacca", 10, 18.0, 16.60, 0.02, False),
+
+        # ── Bab-el-Mandeb southbound → Indian Ocean ───────────────────────────
+        # Ships exiting the Red Sea southward (from Yanbu bypass) into the Indian Ocean.
+        # Gulf of Aden → northern Indian Ocean: ~1,500nm → ~4.5 days
+        # Enables: Saudi Arabia → Yanbu → Red Sea → Bab-el-Mandeb → IOH → India/Asia
+        # without transiting Hormuz. Risk 0.35 (same Bab/Gulf of Aden corridor).
+        ("Bab-el-Mandeb", "Indian Ocean Hub", 3, 4.5, 8.80, 0.35, False),
     ]
 
     for u, v, cost, time, cap, risk, hdep in edges:
