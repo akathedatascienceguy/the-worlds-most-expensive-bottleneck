@@ -1600,9 +1600,9 @@ with tab6:
         yaxis=dict(title="Change (%)", ticksuffix="%"),
         yaxis2=dict(title="CPI Addition (%)", overlaying="y", side="right",
                     ticksuffix="%", showgrid=False),
-        legend=dict(bgcolor="#161b22", x=0.01, y=0.99),
         height=420,
     )
+    fig_ts.update_layout(legend=dict(bgcolor="#161b22", x=0.01, y=0.99))
     st.plotly_chart(fig_ts, use_container_width=True)
 
     # ── Regional breakdown ─────────────────────────────────────────────────────
