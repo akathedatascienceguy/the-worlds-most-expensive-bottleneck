@@ -361,15 +361,22 @@ class QLearningAgent:
 
     def _episode(self, G: nx.DiGraph, source: str, target: str,
                  max_steps: int = 30) -> tuple[list, float]:
-        node   = source
-        path   = [node]
-        total  = 0.0
-        seen   = {node}
+        node      = source
+        path      = [node]
+        total     = 0.0
+        seen      = {node}
+        prev_node   = None
+        prev_action = None
         for _ in range(max_steps):
             if node == target:
                 break
             action = self._act(G, node, exclude=seen, target=target)
             if action is None or not G.has_edge(node, action):
+                # Dead end — penalise the move that led here so the agent
+                # learns to avoid routing into nodes with no onward path
+                # to the target (e.g. Suez Canal when target is Japan).
+                if prev_node is not None and prev_action is not None:
+                    self._update(G, prev_node, prev_action, -50.0, node)
                 break
             e      = G[node][action]
             reward = -(e["cost"] + 10 * e["risk"] + 2 * e["time"])
@@ -379,6 +386,8 @@ class QLearningAgent:
             seen.add(action)
             path.append(action)
             total += reward
+            prev_node   = node
+            prev_action = action
             node = action
         return path, total
 
