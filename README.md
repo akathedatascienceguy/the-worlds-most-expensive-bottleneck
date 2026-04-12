@@ -109,6 +109,98 @@ streamlit run v2/app_v2.py
 
 ---
 
+## How It Works — Concept Guide
+
+Every model in this project is grounded in a specific mathematical idea. Here's each one from first principles.
+
+---
+
+### 🌐 The Oil Network as a Graph G = (V, E)
+
+Strip away the geopolitics and describe the oil supply chain the way a mathematician would — as a *graph*.
+
+- **Nodes (V):** anything that oil passes *through* — a country, a strait, a pipeline terminal
+- **Edges (E):** the connections between them — shipping lanes and pipelines
+
+```
+Producers  →  Chokepoints  →  Transit Hubs  →  Consumers
+Saudi Arabia     Hormuz       Indian Ocean      China
+UAE              Malacca      Red Sea           Japan
+Iraq             Suez Canal   Cape of GH        Europe
+```
+
+Each edge carries four numbers:
+
+| Attribute | What it means |
+|-----------|--------------|
+| `cost` | Shipping cost index (proportional to real VLCC freight rates) |
+| `time` | Transit days (nautical miles ÷ 14 knots) |
+| `capacity` | Max throughput in million barrels/day (real EIA figures) |
+| `risk(t)` | Current geopolitical risk — changes over time |
+
+---
+
+### 🗺️ Dijkstra's Algorithm — The GPS of Graphs
+
+Dijkstra finds the minimum-weight path in O((V+E) log V) by always expanding the cheapest reachable node next. We keep the algorithm identical — we only change the weight function:
+
+```python
+def edge_weight(G, u, v, alpha=0.5, lam=20.0):
+    return e["cost"] + alpha * e["time"] + lam * e["risk"]
+```
+
+**The λ effect:** At λ=0 the algorithm ignores risk and picks the cheapest route (always Hormuz). As λ increases, the risk penalty grows until it outweighs the cost saving — at that threshold the algorithm switches to a bypass route. The cost jump at that threshold is the **price of resilience**.
+
+Switchover occurs at **λ ≈ 15.2** under crisis severity 0.90.
+
+---
+
+### 📡 Ornstein-Uhlenbeck Process — How Risk Evolves
+
+Imagine a rubber band stretched between your hand and a wall. Let go — it snaps back. That's mean reversion. Now add random gusts of wind. That's the OU process.
+
+$$dR(t) = \theta(\mu - R(t))\,dt + \sigma\,dW(t)$$
+
+| Symbol | Meaning | Value |
+|--------|---------|-------|
+| θ | Mean reversion speed | 0.3 |
+| μ | Long-run baseline risk (calibrated per edge to Lloyd's premiums) | varies |
+| σ | Volatility (scales random shock magnitude) | 0.12 × slider |
+| dW(t) | Wiener process — N(0,1) random shock | random |
+
+**Why OU and not a random walk?** A random walk drifts forever — risk would eventually hit 0 or 1 permanently. OU always pulls back toward baseline: crises happen, escalate, and usually de-escalate. This mirrors real geopolitical risk dynamics.
+
+---
+
+### 🤖 Q-Learning — Teaching an Agent to Route
+
+Like learning to drive in an unfamiliar city. At first you turn randomly. Over time you build an *intuition* for every intersection you might face. That's Q-learning — not a memorised path, but a policy.
+
+| Component | Definition |
+|-----------|-----------|
+| **State** s | Current node + Hormuz risk bucket |
+| **Action** a | Which node to move to next |
+| **Reward** R | −(cost + 40·risk + 2·time) + 100 if target reached |
+| **Goal** | Maximise total reward across the journey |
+
+$$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
+
+ε-greedy exploration: starts at 50% random, decays to 5% as training progresses. The agent builds a policy table — a lookup that maps (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search.
+
+---
+
+### 🔴 Why Hormuz is a Single Point of Failure — Betweenness Centrality
+
+Betweenness centrality measures how often a node appears on the shortest path between every pair of other nodes:
+
+$$C_B(v) = \sum_{s \neq v \neq t} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
+
+**Hormuz in numbers:** Remove it, and ~80% of shortest producer→consumer paths break. No other node comes close.
+
+This is why the λ-switchover requires a large risk penalty to trigger — the bypass is economically irrational under normal conditions. High betweenness centrality = high systemic risk. Redundancy means building *parallel paths* that reduce betweenness, not just adding capacity to the bottleneck.
+
+---
+
 ## The Core Insight
 
 > The system doesn't fail because we lack alternative routes.  
