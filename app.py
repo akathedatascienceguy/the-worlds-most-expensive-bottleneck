@@ -376,12 +376,12 @@ class QLearningAgent:
                 # learns to avoid routing into nodes with no onward path
                 # to the target (e.g. Suez Canal when target is Japan).
                 if prev_node is not None and prev_action is not None:
-                    self._update(G, prev_node, prev_action, -50.0, node)
+                    self._update(G, prev_node, prev_action, -100.0, node)
                 break
             e      = G[node][action]
-            reward = -(e["cost"] + 10 * e["risk"] + 2 * e["time"])
+            reward = -(e["cost"] + 40 * e["risk"] + 2 * e["time"])
             if action == target:
-                reward += 50.0
+                reward += 100.0
             self._update(G, node, action, reward, action)
             seen.add(action)
             path.append(action)
@@ -963,8 +963,8 @@ with tab5:
 
     **Reward signal:**
     ```
-    R(edge) = -(cost + 10·risk + 2·time)
-    R(reaching target) += +50
+    R(edge) = -(cost + 40·risk + 2·time)
+    R(reaching target) += +100
     ```
 
     The agent explores randomly at first (high ε), then exploits learned knowledge (ε → 0.05).
@@ -1231,7 +1231,7 @@ That's Q-learning.
 |-----------|-----------|
 | **State** $s$ | Where the agent is + current Hormuz risk level |
 | **Action** $a$ | Which node to move to next |
-| **Reward** $R$ | $-(cost + 10 \cdot risk + 2 \cdot time)$ + 50 if reached target |
+| **Reward** $R$ | $-(cost + 40 \cdot risk + 2 \cdot time)$ + 100 if reached target |
 | **Goal** | Maximise total reward across the journey |
 
 **The Q-function:** $Q(s, a)$ = "how good is it to take action $a$ from state $s$?"

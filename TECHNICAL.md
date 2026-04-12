@@ -320,7 +320,7 @@ The routing problem is cast as a Markov Decision Process:
 |-----------|-----------|
 | **State** s | (current_node, discretised_risk_vector) |
 | **Action** a | Choose next node to move to (from neighbours) |
-| **Reward** R | -(cost + 10·risk + 2·time) + 50·[reached target] |
+| **Reward** R | -(cost + 40·risk + 2·time) + 100·[reached target] |
 | **Transition** | Deterministic: moving to action node |
 | **Discount** γ | 0.9 |
 
@@ -337,7 +337,11 @@ def _state(self, G, node):
 
 Risk is discretised to 5 levels (0, 0.25, 0.5, 0.75, 1.0) to keep the state space tractable. With 24 edges and 5 risk levels, the theoretical state space is 19 × 5²⁴ — in practice, only a tiny fraction of states is visited during training. This is the fundamental limitation of tabular Q-learning on this problem (see §10.1).
 
-**Reward shaping:** The +50 terminal reward for reaching the target is critical — without it, the agent learns to wander (accumulating small penalties is preferable to the large cost of any single high-risk edge).
+**Reward shaping:** The +100 terminal reward for reaching the target is critical — without it, the agent learns to wander (accumulating small penalties is preferable to the large cost of any single high-risk edge).
+
+**Risk coefficient rationale:** The risk coefficient of 40 is calibrated so that at crisis severity (risk ≈ 0.9), the two Hormuz-dependent edges to the Indian Ocean Hub accumulate enough negative reward (~−78) to make the longer bypass route (~−68 to reach the same hub) genuinely preferable. At base risk (0.28), Hormuz remains cheaper, so the agent correctly uses it under normal conditions and reroutes only under genuine crisis. A lower coefficient (e.g. 10) fails because the bypass path's extra hops accumulate more step penalty than the risk savings provide.
+
+**Dead-end penalty:** If the agent navigates into a node with no valid onward path to the target (e.g. Suez Canal when the destination is Japan — Suez connects only to Europe and USA), the episode terminates and a −100 penalty is applied to the move that caused the dead end. This prevents the agent from repeatedly routing into structural dead ends for specific source-target pairs.
 
 ### 5.3 Q-Learning Update Rule
 
@@ -386,9 +390,12 @@ Each episode:
 1. Start at `source`
 2. At each step: ε-greedy action selection (random with prob ε, greedy Q-value otherwise)
 3. Move to selected neighbour, compute reward, update Q-table
-4. Terminate at `target` or after `max_steps=30`
+4. If the chosen node has no valid onward neighbours (dead end), apply −100 penalty to the move that caused it, then terminate
+5. Terminate at `target` or after `max_steps=30`
 
 **Visited set:** Nodes already visited in the current episode are excluded from action selection — this prevents cycles and is biologically reasonable (a tanker doesn't revisit a port it just left).
+
+**Dead-end detection:** Non-target consumer nodes are excluded from the action set. If this leaves no valid neighbours (e.g. reaching Suez Canal when the target is Japan — Suez only connects to Europe and USA), the episode terminates. The −100 penalty is written back to the Q-entry for the *previous* (node, action) pair, not the current dead-end node, so the agent learns to avoid the move that caused the trap.
 
 ### 5.5 Greedy Policy Extraction
 
@@ -802,8 +809,9 @@ State  s:  (current_node, hormuz_risk_bucket)
 Action a:  choose next node from unvisited neighbours
            (non-target consumer nodes excluded to prevent dead-ends)
 
-Reward R:  -(cost + 10·risk + 2·time)   per edge traversed
-           + 50.0                         if action == target
+Reward R:  -(cost + 40·risk + 2·time)   per edge traversed
+           + 100.0                        if action == target
+           - 100.0                        if action leads to a dead end (no onward path to target)
 
 Discount γ = 0.9 (future rewards worth 90% of immediate rewards)
 ```
