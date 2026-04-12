@@ -46,6 +46,56 @@ The whole thing runs in a Streamlit browser app. Trigger a crisis with a button.
 
 The simulation is clean. The underlying problem it's modelling is not.
 
+> **Give it a go yourself:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main) — or keep reading for the complete breakdown.
+
+---
+
+## The Strait of Hormuz in Graph Terms
+
+Every barrel of oil has a journey. It starts in a Gulf oilfield, moves through pipelines to a port, crosses open water through straits that have been strategically contested for centuries, and ends up refined into the fuel that powers the city you're reading this in. That journey is a logistics problem. And like every logistics problem, it can be modelled as a graph.
+
+A directed graph G = (V, E):
+
+- Oil flows from **sources** (Gulf producers) to **destinations** (refineries and consumers)
+- Through a **network of routes** (shipping lanes, pipelines)
+- Constrained by capacity, transit time, and cost
+
+The conventional approach optimises for `min Σ c(e)`. The risk-aware approach optimises for `min Σ [c(e) + α·t(e) + λ·r(e, t)]` — where λ is your risk aversion parameter: how much you're willing to pay in extra cost to route around danger. This is no longer the shortest-path problem. It's risk-aware routing on a dynamic graph.
+
+In network theory, Hormuz has several notable properties:
+
+- **High betweenness centrality.** Remove Hormuz from the graph and the number of shortest paths between Gulf producers and East Asian consumers drops dramatically. No other single node has this property.
+- **High flow dependency.** Roughly 20 million barrels per day transit through it (EIA 2024). The next largest single-point dependency, the Strait of Malacca, handles 16.6 MBD — but *receives* oil from Hormuz, so it is downstream of the bottleneck, not parallel to it.
+- **Catastrophic failure impact.** A single node failure doesn't just increase route cost — it can make the destination unreachable within time and capacity constraints, unless bypass alternatives with sufficient throughput exist.
+
+### Edge Topology
+
+The graph has 24 directed edges. Key structural properties:
+
+**Hormuz funnel:** All five Gulf producers have a direct edge into the Hormuz node. Hormuz has a single outbound edge to Indian Ocean Hub at 20.0 MBD capacity — the bottleneck edge. All six of these edges are flagged `hormuz_dependent=True`.
+
+**Bypass routes:**
+- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, 7.0 MBD) `→ Red Sea → Bab-el-Mandeb → Indian Ocean Hub` (southbound to Indian Ocean) or `→ Suez Canal` (northbound to Europe/USA)
+- `UAE → Fujairah` (ADCO/Habshan pipeline, 1.5 MBD, ADNOC) `→ Indian Ocean Hub` directly
+
+**Critical connectivity note:** The bypass graph is fully closed for all producer–consumer pairs. Bab-el-Mandeb → Indian Ocean Hub is the key edge enabling Saudi Arabia to reach India, China, and Japan without transiting Hormuz. Without it, the Yanbu bypass terminates at Suez Canal and Asian consumers are unreachable by any Hormuz-free path.
+
+**Capacity constraints:** Capacity is stored per edge but is not enforced as a hard constraint in the current routing implementation — it is surfaced as a metric (bottleneck capacity along the chosen path). Full capacity-constrained routing would require min-cost max-flow.
+
+---
+
+## Risk Modelling
+
+### Risk as a Stochastic Process
+
+Risk is not a static scalar — it evolves continuously in response to geopolitical events, market signals, and random shocks. The chosen model is the Ornstein-Uhlenbeck (OU) process: a mean-reverting stochastic differential equation.
+
+The baseline risk values in this model are calibrated directly to Lloyd's / S&P war-risk insurance premium bands. Unlike a random walk, OU is mean-reverting — risk does not drift to 0 or 1 permanently absent new shocks. This mirrors real geopolitical risk: crises occur, escalate, and (usually) de-escalate back toward a baseline. The window to reroute is not zero — there is time between a risk spike and a crisis peak. The question is whether your routing system is reactive (responds after the spike) or adaptive (responds during it).
+
+### Hormuz Crisis Shock
+
+A separate function applies a sudden, large risk spike to all Hormuz-dependent edges. In Monte Carlo runs, `severity` is sampled uniformly in [0.45, 0.95]. For the deterministic crisis button, it is set to 0.90. A ±0.05 jitter prevents unrealistic uniformity across edges.
+
 ---
 
 ## What This Is
@@ -323,6 +373,30 @@ v2/
 
 ---
 
+---
+
+## The V2 Evolution
+
+### Changing Where the Risk Comes From
+
+This is where data stops being decorative and starts doing actual work. Unlike in v1 where risk `r(e, t)` is directly observed, in v2 it's *inferred from signals*.
+
+**Textual Signals**
+
+News headlines, diplomatic statements, shipping advisories, and social media encode conflict escalation before it shows up in market prices. A transformer-based NLP model estimates a sentiment score from −1 (peaceful) to +1 (conflictual) that modulates the prior risk level.
+
+**Time-Series Market Signals**
+
+Oil price volatility, tanker day rates, and war-risk insurance premiums are real-time market aggregations of dispersed information. A sharp spike in insurance premiums for Hormuz-transiting vessels is a Bayesian update — the market knows something.
+
+**Spatial Signals**
+
+AIS tracking data gives vessel positions in near-real-time. Unusual clustering, vessels deviating from standard lanes, or suspicious transponder gaps are anomaly signals. Satellite imagery adds another layer.
+
+All three signal types are fed to a two-layer LSTM that learns to predict next-step risk. Insurance premiums take ~7 steps to reprice after a risk event. Sentiment moves first. A model that reads sentiment can anticipate a crisis 7 steps before the market has fully priced it in — and reroute accordingly. For a VLCC carrying $100M of crude, the difference between rerouting on day 1 of an escalation versus day 8 is not abstract.
+
+---
+
 ### 5. LSTM Risk Predictor (v2)
 **What it does:** Learns to predict next-step risk from correlated signals — news sentiment (leading), insurance premiums (lagging), oil volatility (concurrent).
 
@@ -386,6 +460,16 @@ Each algorithm illuminates a different dimension of the same problem:
 | Cascade | What does failure do to the real economy? | East Asia takes 4× the GDP hit of the USA |
 
 Taken together: **the system works, the rerouting is possible, the bypass exists — and the market will not pay for it until it has no choice.** Every algorithm confirms a different facet of that same structural problem.
+
+---
+
+## Conclusion
+
+The whole thing runs in a Streamlit browser app. Trigger a crisis with a button. The graph re-routes. The cascade unfolds. The numbers update.
+
+Taken together: the system works, the rerouting is possible, the bypass exists — and the market will not pay for it until it has no choice. Every algorithm confirms a different facet of that same structural problem. The simulation is clean. The underlying problem it's modelling is not.
+
+All numeric parameters are sourced from real data: EIA throughput figures, CEIC/FRED export volumes, Lloyd's/S&P war-risk insurance premiums, and Signal Group freight rates. See `DATA_SOURCES.md` for full citations.
 
 ---
 
