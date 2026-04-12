@@ -273,13 +273,13 @@ def reset_risks(G: nx.DiGraph) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def edge_weight(G: nx.DiGraph, u: str, v: str,
-                alpha: float = 0.5, lam: float = 10.0) -> float:
+                alpha: float = 0.5, lam: float = 20.0) -> float:
     e = G[u][v]
     return e["cost"] + alpha * e["time"] + lam * e["risk"]
 
 
 def risk_dijkstra(G: nx.DiGraph, source: str, target: str,
-                  alpha: float = 0.5, lam: float = 10.0):
+                  alpha: float = 0.5, lam: float = 20.0):
     pq = [(0.0, source, [source])]
     visited: set = set()
     while pq:
@@ -402,20 +402,26 @@ class QLearningAgent:
             # Without this every episode sees the same state → Q-table has
             # identical entries → greedy path always matches Dijkstra.
             saved = {(u, v): G[u][v]["risk"] for u, v in edges}
-            # Cycle through risk regimes: normal → elevated → crisis → recovery
+            # Cycle through 4 phases, each targeting a distinct Hormuz risk
+            # bucket so all 4 state buckets (0.25 / 0.5 / 0.75 / 1.0) are
+            # trained. Bucket = round(avg_hormuz_risk × 4) / 4:
+            #   phase 0 → bucket 0.25  (base ≈ 0.28)
+            #   phase 1 → bucket 0.50  (base + 0.22 ≈ 0.50)
+            #   phase 2 → bucket 0.75  (hdep → 0.76)
+            #   phase 3 → bucket 1.00  (hdep → 0.93)  ← matches severity 0.90
             phase = (ep % 4)
             for u, v in edges:
                 base = G[u][v]["base_risk"]
                 hdep = G[u][v].get("hormuz_dependent", False)
-                if phase == 0:   # normal
-                    G[u][v]["risk"] = float(np.clip(base + np.random.normal(0, 0.05), 0, 1))
-                elif phase == 1: # elevated tension
-                    bump = 0.30 if hdep else 0.05
-                    G[u][v]["risk"] = float(np.clip(base + bump + np.random.normal(0, 0.05), 0, 1))
-                elif phase == 2: # crisis
-                    G[u][v]["risk"] = float(np.clip((0.85 if hdep else base) + np.random.normal(0, 0.05), 0, 1))
-                else:            # recovery
-                    G[u][v]["risk"] = float(np.clip(base + 0.10 + np.random.normal(0, 0.08), 0, 1))
+                if phase == 0:   # normal          → bucket 0.25
+                    G[u][v]["risk"] = float(np.clip(base + np.random.normal(0, 0.04), 0, 1))
+                elif phase == 1: # elevated tension → bucket 0.50
+                    bump = 0.22 if hdep else 0.05
+                    G[u][v]["risk"] = float(np.clip(base + bump + np.random.normal(0, 0.04), 0, 1))
+                elif phase == 2: # serious crisis   → bucket 0.75
+                    G[u][v]["risk"] = float(np.clip((0.76 if hdep else base) + np.random.normal(0, 0.04), 0, 1))
+                else:            # extreme crisis   → bucket 1.00
+                    G[u][v]["risk"] = float(np.clip((0.93 if hdep else base) + np.random.normal(0, 0.03), 0, 1))
             _, r = self._episode(G, source, target)
             for u, v in edges:  # restore original risks
                 G[u][v]["risk"] = saved[(u, v)]
@@ -561,7 +567,7 @@ with st.sidebar:
     st.markdown("### Routing Parameters")
     alpha = st.slider("⏱ Time Weight α", 0.0, 2.0, 0.5, 0.1,
                       help="Cost weight on transit time")
-    lam   = st.slider("⚠️ Risk Aversion λ", 0.0, 50.0, 10.0, 1.0,
+    lam   = st.slider("⚠️ Risk Aversion λ", 0.0, 50.0, 20.0, 1.0,
                       help="Higher = pay more to avoid risky edges")
 
     st.markdown("---")
