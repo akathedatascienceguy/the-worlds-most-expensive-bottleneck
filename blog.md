@@ -1,4 +1,4 @@
-# I Built a Simulation That Shows How the World's Oil Supply Could Collapse — Here's What the Math Says
+# We Built a Simulation That Shows How the World's Oil Supply Could Collapse — Here's What the Math Says
 
 *Graph theory + geopolitics + a suspicious amount of Python. Buckle up.*
 
