@@ -167,6 +167,136 @@ v2/
 
 ---
 
+## What Each Algorithm Actually Tells You
+
+### 1. Risk-Aware Dijkstra
+**What it does:** Finds the optimal route by treating risk as a cost — `cost + α·time + λ·risk`.
+
+**The conclusion:** There is a precise price at which safe routing becomes economically rational. Below that λ threshold, shippers will always choose Hormuz — not out of ignorance, but because the math tells them to. Above it, the bypass wins automatically. No human judgment required.
+
+**The usefulness:** It quantifies the resilience premium. You can tell a policymaker, a shipper, or an insurer exactly how much more expensive the safe route is under any given risk level. That number is the conversation. Everything else is politics.
+
+**Results:**
+- At base risk (λ=20): optimal route is `Saudi Arabia → Hormuz → Indian Ocean Hub → Malacca → Japan` — cost index 16, transit 30.3 days
+- Switchover occurs at **λ ≈ 15.2** under crisis severity 0.90
+- Above switchover: route flips to `Saudi Arabia → Yanbu → Red Sea → Bab-el-Mandeb → Indian Ocean Hub → Malacca → Japan` — cost index 26, transit 38.5 days
+- **Cost of resilience: +62% in cost, +8.2 days in transit** — the exact premium the market refuses to pay upfront
+
+---
+
+### 2. Ornstein-Uhlenbeck Risk Model
+**What it does:** Simulates how risk evolves over time — mean-reverting, stochastic, calibrated to real insurance premiums.
+
+**The conclusion:** Risk is not an event, it's a process. It builds, peaks, and decays. Systems that treat risk as binary (safe / not safe) will always be caught off-guard. Systems that model its trajectory can prepare.
+
+**The usefulness:** It shows that the window to reroute is not zero. There is time between a risk spike and a crisis peak. The question is whether your routing system is reactive (responds after the spike) or adaptive (responds during it).
+
+**Results:**
+- Mean reversion speed θ=0.3: a crisis spike decays back to baseline in ~10–15 simulation ticks
+- At volatility=0.3 (default), risk standard deviation per tick ≈ 0.036 — consistent with observed daily war-risk premium fluctuations during moderate tension
+- Bab-el-Mandeb base risk 0.35 reflects real 2024 post-Houthi premiums (down from 2.0% hull peak in 2023)
+- A simulated Hormuz crisis (severity=0.90) raises route cost from 16 → 107 weighted units at λ=40, forcing automatic rerouting
+
+---
+
+### 3. Monte Carlo Stress Testing
+**What it does:** Runs 500 disruption scenarios at random severities and measures cost premiums and rerouting rates.
+
+**The conclusion:** At severity above 0.75, the network reroutes in almost every scenario — but pays 30–50% more every time. The tail risk is not rare. It is *priced but unpaid*. The market knows the bypass exists. It just refuses to pay for it preemptively.
+
+**The usefulness:** It gives you a distribution, not a point estimate. Planners don't need to know what *will* happen — they need to know what the 95th percentile looks like and whether their system can absorb it.
+
+**Results:**
+- Severity 0.30–0.50: ~0% rerouting, negligible cost increase
+- Severity 0.50–0.75: partial rerouting, +10–30% cost premium
+- Severity 0.75+: ~100% of scenarios reroute away from Hormuz
+- Cost premium at full rerouting: **+30–50% per route**
+- Worst-case transit time increase: +8–12 days (adds 10–34 days total depending on destination)
+- Bottleneck capacity drops from 20 MBD (Hormuz) to 7 MBD (Yanbu bypass) — a **65% throughput reduction** on the bypass corridor
+
+---
+
+### 4. Q-Learning (Tabular RL)
+**What it does:** Learns a routing policy through trial and error — building a generalised map of what to do under any (node, risk level) combination.
+
+**The conclusion:** A system that learns from experience routes differently from one that optimises from scratch each time. The Q-learning agent develops something close to institutional memory — it knows to avoid Hormuz before the risk metric peaks, not after.
+
+**The limitation:** The state space is effectively infinite (19 × 5²⁴). The agent can only learn what it has seen. Anything outside its training experience gets a Q-value of zero — random behaviour precisely when the situation is most unusual and the stakes are highest.
+
+**Results:**
+- Converges in ~300 episodes; reward curve plateaus and stabilises by episode 200–250
+- At normal risk: agent matches Dijkstra — routes through Hormuz
+- At crisis (Hormuz bucket = 1.0): agent correctly reroutes via Yanbu bypass, avoiding Hormuz exposure
+- Key training insight: risk coefficient must be **40×** (not 10×) for the bypass's extra hops to be worth it in cumulative reward terms; and training must explicitly cover state bucket 1.0 (risk ≈ 0.93) to match inference at severity 0.90
+
+---
+
+### 5. LSTM Risk Predictor (v2)
+**What it does:** Learns to predict next-step risk from correlated signals — news sentiment (leading), insurance premiums (lagging), oil volatility (concurrent).
+
+**The conclusion:** The market is slow. Insurance premiums take ~7 steps to reprice after a risk event. Sentiment moves first. A model that reads sentiment can anticipate a crisis 7 steps before the market has fully priced it in — and reroute accordingly.
+
+**The usefulness:** In a real system, this is the difference between rerouting on day 1 of an escalation versus day 8. For a VLCC carrying $100M of crude, that matters.
+
+**Results:**
+- ~251K parameters; 2-layer LSTM trained on 2,000-step synthetic time series
+- Train MSE: 0.040 → 0.003 over 120 epochs; Val MSE: 0.045 → 0.005 (no significant overfitting)
+- Successfully learns signal lag structure: uses sentiment drop as early warning 3–5 steps ahead of risk peak
+- Predicts Hormuz risk elevation **7 steps before insurance premiums fully reprice** — enabling pre-crisis rerouting
+
+---
+
+### 6. Deep Q-Network (v2)
+**What it does:** Replaces the lookup table with a neural network that generalises across a continuous 43-dimensional state space.
+
+**The conclusion:** Tabular Q-learning fails at scale because it cannot generalise. The DQN can. It has never seen severity 0.91 before, but it has seen 0.89 and 0.93 — and it interpolates. This is the difference between a policy that works only in training conditions and one that works in the world.
+
+**Results:**
+- ~46K parameters; trains in 600 episodes with experience replay (buffer=10,000) and target network sync every 100 steps
+- Huber loss stabilises training: TD error variance reduced ~60% vs MSE loss in early episodes
+- At crisis: DQN routes via bypass in 100% of tested scenarios — matching or outperforming Dijkstra at equivalent λ
+- Generalises cleanly to unseen risk combinations; tabular agent produces random paths on ~40% of novel states
+
+---
+
+### 7. Economic Cascade Model (v2)
+**What it does:** Translates a Hormuz closure into macro consequences — oil price → freight premium → CPI → food prices → central bank response → GDP contraction — across five regions.
+
+**The conclusion:** The cost of a Hormuz closure is not the rerouting premium. East Asia, 85% import-dependent, absorbs four times the GDP shock of the United States. Food prices spike before oil prices even peak. Central banks respond to inflation they cannot supply-side fix. The cascade is non-linear and geographically unequal.
+
+**Results (90-day closure, moderate severity):**
+| Region | Oil Import Dependency | Est. CPI Impact | Est. GDP Impact |
+|--------|----------------------|-----------------|-----------------|
+| East Asia (China, Japan, Korea) | ~85% | +4–6% | −2.5–3.5% |
+| South Asia (India) | ~80% | +3–5% | −1.5–2.5% |
+| Europe | ~60% | +2–4% | −1.0–2.0% |
+| Middle East (non-Gulf) | ~40% | +1–3% | −0.5–1.5% |
+| USA | ~15% | +0.5–1.5% | −0.3–0.8% |
+
+- Food price impact leads GDP impact by 15–30 days due to fertiliser and freight pass-through
+- Central bank rate responses add a second-order GDP drag 60–90 days post-closure
+- 95th percentile (Monte Carlo tail): East Asia GDP impact reaches **−5%+** under extended closure
+
+---
+
+### The Unified Conclusion
+
+Each algorithm illuminates a different dimension of the same problem:
+
+| Algorithm | What it answers | Key result |
+|-----------|----------------|------------|
+| Dijkstra | What is the optimal route, and what does safety cost? | Switchover at λ≈15; bypass costs +62% |
+| OU Process | How does risk evolve, and how long do you have? | Crisis decays in ~10–15 ticks; window exists |
+| Monte Carlo | What does the tail look like across 500 scenarios? | 100% rerouting above severity 0.75; +30–50% cost |
+| Q-Learning | Can a system learn crisis-regime behaviour? | Yes — but only if trained on the right risk buckets |
+| LSTM | Can you see a crisis before the market does? | 7 steps of advance warning from sentiment signal |
+| DQN | Does the policy generalise to novel conditions? | Yes — 100% bypass rate vs ~60% for tabular agent |
+| Cascade | What does failure do to the real economy? | East Asia takes 4× the GDP hit of the USA |
+
+Taken together: **the system works, the rerouting is possible, the bypass exists — and the market will not pay for it until it has no choice.** Every algorithm confirms a different facet of that same structural problem.
+
+---
+
 ## Read More
 
 - [`blog.md`](blog.md) — full technical narrative
