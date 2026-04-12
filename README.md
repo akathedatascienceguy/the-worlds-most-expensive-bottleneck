@@ -1,8 +1,50 @@
 # The World's Most Expensive Bottleneck
 
+*Written by Yash Vardhan Gupta and Nikita Gupta*
+
 > An interactive simulation where you can break the global oil network, watch it scramble in real time, and understand exactly what resilience costs.
 
 **Two versions.** v1 is a self-contained POC. v2 adds a trained neural risk predictor, a Deep Q-Network routing agent, and a full macro-economic cascade model.
+
+---
+
+Somewhere between a crude oil tanker leaving the Gulf and your Uber ride getting more expensive, lies a narrow stretch of water called the Strait of Hormuz.
+
+Roughly 1 in every 5 barrels of oil passes through it.
+
+Which is wild, because from a systems design perspective, that's like: routing 20% of global internet traffic through a single server and just… hoping it doesn't crash.
+
+It's not that alternatives don't exist. Pipelines bypass Hormuz. Tankers can round the Cape of Good Hope. The Saudi East-West pipeline terminates at Yanbu on the Red Sea. But these alternatives are underutilised, under-capacity, and significantly more expensive.
+
+The world didn't optimise for resilience. It optimised for cost. And in a world where nothing goes wrong, that's a perfectly rational choice.
+
+The problem is that things go wrong.
+
+Welcome to the world's most expensive bottleneck.
+
+---
+
+## What We've Built
+
+We took that problem — one the energy industry has quietly lived with for decades — and modelled it.
+
+Not with a spreadsheet. Not with a think-tank white paper. With a working simulation: a dynamic, stochastic graph of the global oil supply chain that you can break, stress-test, and watch scramble in real time.
+
+Every barrel of oil has a journey. It starts in a Gulf oilfield, moves through pipelines to a port, crosses open water through straits that have been strategically contested for centuries, and ends up refined into the fuel that powers the city you're reading this in. That journey is a logistics problem. And like every logistics problem, it can be modelled as a graph.
+
+We built that graph — 24 nodes, 24 directed edges, spanning Gulf producers, maritime chokepoints, pipeline bypass hubs, and consuming nations across Asia, Europe, and North America. Every edge carries real numbers: cost, transit time, throughput capacity, and a time-varying risk score calibrated to Lloyd's and S&P war-risk insurance premiums. Then we asked a simple question: what does the optimal route look like when the definition of "optimal" changes?
+
+That's v1. A risk-aware routing algorithm that treats geopolitical instability as a cost — the higher your risk aversion, the more expensive a dangerous edge becomes, until the algorithm quietly abandons Hormuz and reroutes through Bab-el-Mandeb and the Cape of Good Hope. A tabular reinforcement learning agent that doesn't just solve the routing problem once, but learns a policy — a generalised intuition about what to do under any combination of conditions. And a Monte Carlo stress-tester that runs 500 disruption scenarios to put a number on what resilience actually costs.
+
+The answer is 30–50% more per barrel. Every time.
+
+v2 goes further. The risk model — previously a mathematical formula — is replaced by a trained neural network: a two-layer LSTM that learns to predict rising risk from structured signals before the market has finished pricing it in. News sentiment leads a crisis by 3–5 steps. Insurance premiums lag it by 7. The model learns the difference, and routes accordingly. The reinforcement learning agent becomes a Deep Q-Network, operating over a continuous 43-dimensional state space — finally capable of generalising to conditions it has never seen before.
+
+And then, because routing cost alone is still just an abstraction, we built an economic cascade model. A Hormuz disruption doesn't just reroute tankers. It spikes oil prices, inflates freight premiums, passes through into consumer prices, disrupts food supply chains, triggers central bank responses, and ultimately contracts GDP — differently, in each region of the world. We modelled all of it, across five global regions, with Monte Carlo quantification of the tail-risk outcomes that planners should actually be designing for.
+
+The whole thing runs in a Streamlit browser app. Trigger a crisis with a button. The graph re-routes. The cascade unfolds. The numbers update.
+
+The simulation is clean. The underlying problem it's modelling is not.
 
 ---
 
