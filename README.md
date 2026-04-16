@@ -46,7 +46,9 @@ The whole thing runs in a Streamlit browser app. Trigger a crisis with a button.
 
 The simulation is clean. The underlying problem it's modelling is not.
 
-> **Give it a go yourself:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main) — or keep reading for the complete breakdown.
+> **Try it live (v1):** [the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app) — no setup required.
+>
+> **Source code:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main)
 
 ---
 
@@ -339,7 +341,11 @@ Taken together: **the system works, the rerouting is possible, the bypass exists
 
 ## Quick Start
 
-### v1 (no ML dependencies)
+### v1 — Live Demo
+
+**[the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)** — runs in your browser, no install needed.
+
+### v1 — Run Locally
 
 ```bash
 python3 -m venv venv
