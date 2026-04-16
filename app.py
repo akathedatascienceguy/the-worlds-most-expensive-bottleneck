@@ -559,6 +559,8 @@ CONSUMERS = ["India", "China", "Japan", "Europe", "USA"]
 with st.sidebar:
     st.markdown("## 🛢️ Network Controls")
     st.markdown("---")
+    st.caption("Built by **Yash Vardhan Gupta** & **Nikita Gupta**")
+    st.markdown("---")
 
     source = st.selectbox("Source (Producer)", PRODUCERS, index=0)
     target = st.selectbox("Destination (Consumer)", CONSUMERS, index=1)
