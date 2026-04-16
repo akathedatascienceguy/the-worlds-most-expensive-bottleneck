@@ -343,7 +343,7 @@ Taken together: **the system works, the rerouting is possible, the bypass exists
 
 ### v1 — Live Demo
 
-**[the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)** — runs in your browser, no install needed.
+**[the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)**, runs in your browser, no install needed.
 
 ### v1 — Run Locally
 
