@@ -62,7 +62,22 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import sentry_sdk
 import streamlit as st
+import streamlit_analytics2 as streamlit_analytics
+
+# ── Sentry error monitoring ───────────────────────────────────────────────────
+_sentry_dsn = st.secrets.get("SENTRY_DSN", "") if hasattr(st, "secrets") else ""
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        traces_sample_rate=0.2,
+    )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ANALYTICS WRAPPER — must be opened before any st.* calls
+# ──────────────────────────────────────────────────────────────────────────────
+streamlit_analytics.start_tracking()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -1891,3 +1906,6 @@ st.markdown("""
     Objective: min Σ[cost(e) + α·time(e) + λ·risk(e,t)]
 </div>
 """, unsafe_allow_html=True)
+
+# ── Close analytics tracker ───────────────────────────────────────────────────
+streamlit_analytics.stop_tracking()
