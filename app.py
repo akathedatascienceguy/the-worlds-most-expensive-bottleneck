@@ -62,22 +62,34 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import sentry_sdk
 import streamlit as st
-import streamlit_analytics2 as streamlit_analytics
+
+try:
+    import sentry_sdk
+    _sentry_available = True
+except ImportError:
+    _sentry_available = False
+
+try:
+    import streamlit_analytics2 as streamlit_analytics
+    _analytics_available = True
+except ImportError:
+    _analytics_available = False
 
 # ── Sentry error monitoring ───────────────────────────────────────────────────
-_sentry_dsn = st.secrets.get("SENTRY_DSN", "") if hasattr(st, "secrets") else ""
-if _sentry_dsn:
-    sentry_sdk.init(
-        dsn=_sentry_dsn,
-        traces_sample_rate=0.2,
-    )
+if _sentry_available:
+    try:
+        _sentry_dsn = st.secrets.get("SENTRY_DSN", "")
+        if _sentry_dsn:
+            sentry_sdk.init(dsn=_sentry_dsn, traces_sample_rate=0.2)
+    except Exception:
+        pass
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ANALYTICS WRAPPER — must be opened before any st.* calls
 # ──────────────────────────────────────────────────────────────────────────────
-streamlit_analytics.start_tracking()
+if _analytics_available:
+    streamlit_analytics.start_tracking()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -1906,6 +1918,9 @@ st.markdown("""
     Objective: min Σ[cost(e) + α·time(e) + λ·risk(e,t)]
 </div>
 """, unsafe_allow_html=True)
+
+if _analytics_available:
+    streamlit_analytics.stop_tracking()
 
 # ── Close analytics tracker ───────────────────────────────────────────────────
 streamlit_analytics.stop_tracking()
