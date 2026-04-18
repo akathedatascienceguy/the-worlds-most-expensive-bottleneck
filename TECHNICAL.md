@@ -110,21 +110,23 @@ build_oil_network() → nx.DiGraph
 
 ### 2.2 Edge Topology
 
-The graph has **24 directed edges**. Key structural properties:
+The graph has **25 directed edges**. Key structural properties:
 
 **Hormuz funnel:** All five Gulf producers have a direct edge into the `Hormuz` node. `Hormuz` has a single outbound edge to `Indian Ocean Hub` with capacity 20.0 MBD — the bottleneck edge. All six of these edges are flagged `hormuz_dependent=True`.
 
 **Bypass routes:**
-- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, **7.0 MBD** post-March 2026 upgrade — Fortune/Argus Media/CNBC, March 28 2026) → Red Sea → Bab-el-Mandeb → **Indian Ocean Hub** (southbound exit into Indian Ocean) or → Suez Canal (northbound to Europe/USA)
+- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, **7.0 MBD** post-March 2026 upgrade — Fortune/Argus Media/CNBC, March 28 2026) — two structurally distinct onward legs:
+  - **Northbound:** `Yanbu → Suez Canal` directly (~1,000nm, ~3 days, risk 0.10). Yanbu sits at 24°N, Suez at 30°N — ships sail straight up the Red Sea without touching Bab-el-Mandeb. This is the cleanest bypass in the network: avoids both Hormuz and Houthi-exposed southern corridor.
+  - **Southbound:** `Yanbu → Red Sea → Bab-el-Mandeb → Indian Ocean Hub` (~7.5 days total). Used for Asia-bound cargo. Ships exit through the southern gate of the Red Sea into the Indian Ocean.
 - `UAE → Fujairah` (ADCO/Habshan pipeline, 1.5 MBD, ADNOC) → Indian Ocean Hub directly
 
-**Critical connectivity note:** The bypass graph is fully closed for all producer-consumer pairs. `Bab-el-Mandeb → Indian Ocean Hub` is the key edge enabling Saudi Arabia to reach India, China, and Japan without transiting Hormuz. Without it, the Yanbu bypass terminates at Suez Canal and Asian consumers are unreachable by any Hormuz-free path.
+**Critical connectivity note:** The bypass graph is fully closed for all producer-consumer pairs. For Europe and USA, the Yanbu northbound leg bypasses both Hormuz and Bab-el-Mandeb. For Asian consumers, `Bab-el-Mandeb → Indian Ocean Hub` is the enabling edge — without it, no Hormuz-free path to India, China, or Japan exists.
 
 **Consumer-facing legs:**
 - `Indian Ocean Hub → India` (short haul, ~2 days)
 - `Indian Ocean Hub → Strait of Malacca → China / Japan` (East Asia, ~20 + 5/8 days)
 - `Indian Ocean Hub → Cape of Good Hope → Europe / USA / India / Strait of Malacca` (ultra-long bypass, lowest risk)
-- `Suez Canal → Europe / USA` (West, via Red Sea/Bab-el-Mandeb northbound)
+- `Suez Canal → Europe / USA` (reachable directly from Yanbu northbound, or via Bab-el-Mandeb from Indian Ocean)
 
 **Complete edge list by category:**
 
@@ -133,12 +135,13 @@ The graph has **24 directed edges**. Key structural properties:
 | Producers → Hormuz | SA, UAE, Iraq, Kuwait, Qatar | 5 |
 | Bypass pipelines | SA→Yanbu, UAE→Fujairah | 2 |
 | Hormuz outbound | Hormuz→IOH, Fujairah→IOH | 2 |
-| Red Sea corridor | Yanbu→RS, RS→Bab, Bab→Suez, Bab→IOH | 4 |
+| Yanbu northbound | Yanbu→Suez | 1 |
+| Red Sea southbound corridor | Yanbu→RS, RS→Bab, Bab→Suez, Bab→IOH | 4 |
 | IOH → consumers/hubs | IOH→India, IOH→Malacca, IOH→Cape | 3 |
 | Malacca → East Asia | Malacca→China, Malacca→Japan | 2 |
 | Suez → West | Suez→Europe, Suez→USA | 2 |
 | Cape → consumers | Cape→Europe, Cape→USA, Cape→India, Cape→Malacca | 4 |
-| **Total** | | **24** |
+| **Total** | | **25** |
 
 ### 2.3 Capacity Constraints
 
@@ -336,7 +339,7 @@ def _state(self, G, node):
     return (node, risks)
 ```
 
-Risk is discretised to 5 levels (0, 0.25, 0.5, 0.75, 1.0) to keep the state space tractable. With 24 edges and 5 risk levels, the theoretical state space is 19 × 5²⁴ — in practice, only a tiny fraction of states is visited during training. This is the fundamental limitation of tabular Q-learning on this problem (see §10.1).
+Risk is discretised to 5 levels (0, 0.25, 0.5, 0.75, 1.0) to keep the state space tractable. With 25 edges and 5 risk levels, the theoretical state space is 19 × 5²⁵ — in practice, only a tiny fraction of states is visited during training. This is the fundamental limitation of tabular Q-learning on this problem (see §11.1).
 
 **Reward shaping:** The +100 terminal reward for reaching the target is critical — without it, the agent learns to wander (accumulating small penalties is preferable to the large cost of any single high-risk edge).
 
@@ -606,7 +609,7 @@ Sources: Hamilton (1983, 2009); Kilian (2008 AER); IMF WEO Oct 2022; EIA/IEA 202
 
 The network is drawn on a Plotly `Scattergeo` figure — a world map projection with overlay traces.
 
-**Edge rendering:** One trace per edge (24 traces total). Each trace is a 3-point line `[lon_u, lon_v, None]` / `[lat_u, lat_v, None]` — the `None` breaks the line so edges don't connect to each other.
+**Edge rendering:** One trace per edge (25 traces total). Each trace is a 3-point line `[lon_u, lon_v, None]` / `[lat_u, lat_v, None]` — the `None` breaks the line so edges don't connect to each other.
 
 ```python
 fig.add_trace(go.Scattergeo(
@@ -752,7 +755,7 @@ History logging (Risk Simulator tab)
         ▼
 Visualisation
   draw_network(G, path)
-    ├── 24 edge traces (risk-coloured, width ∝ capacity)
+    ├── 25 edge traces (risk-coloured, width ∝ capacity)
     ├── Path edges drawn in gold at width 5
     └── Node markers coloured by type, gold border if in path
         │
@@ -807,7 +810,7 @@ monte_carlo_economic(n=500, base_price)
 | Static graph topology | Edges don't appear/disappear. In reality, canal closures and pipeline shutdowns remove edges entirely. | Still open |
 | Simulated risk only | Risk is generated by OU process, not real signals. | **LSTM in v2** trains on correlated synthetic signals (oil vol, insurance, sentiment) |
 | Single-commodity flow | Model routes one flow at a time. Real logistics involves simultaneous multi-commodity flows. | Still open |
-| Q-table scalability | Tabular Q-learning doesn't scale — 19 × 5²⁴ theoretical state space, almost entirely unvisited. | **DQN in v2** generalises via neural interpolation |
+| Q-table scalability | Tabular Q-learning doesn't scale — 19 × 5²⁵ theoretical state space, almost entirely unvisited. | **DQN in v2** generalises via neural interpolation |
 | Economic model uses simulated risk | `oil_price_scenario` uses the slider severity, not live graph risk — cascade is a scenario tool, not a live feed. | Accepted trade-off for legibility |
 
 ### 11.2 Direct Extensions

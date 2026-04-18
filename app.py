@@ -168,18 +168,26 @@ def build_oil_network() -> nx.DiGraph:
         ("Fujairah",     "Indian Ocean Hub", 2,  0.7,  1.50, 0.09, False),
 
         # ── Yanbu / Red Sea legs ──────────────────────────────────────────────
-        # Yanbu loading → Red Sea: short coastal run ~1 day; SUMED parallel pipeline 2.5 MBD
-        # Capacity matches upgraded Petroline throughput (7.0 MBD post-March 2026)
+        # Yanbu → Suez Canal DIRECT (northbound): Yanbu is at 24°N, Suez at 30°N.
+        # Ships heading to Europe/USA sail directly north up the Red Sea — no Bab-el-Mandeb detour.
+        # ~1,000nm → ~3 days at 13kn. Avoids Houthi-exposed southern corridor entirely.
+        # Capacity 7.0 MBD (Petroline throughput); risk 0.10 (northern Red Sea, below Houthi range)
+        ("Yanbu",        "Suez Canal",       3,  3.0,  7.00, 0.10, False),
+
+        # Yanbu → Red Sea (southbound): for Asia-bound cargo only.
+        # Ships heading to India/China/Japan exit south through Bab-el-Mandeb into Indian Ocean.
+        # ~700nm south to open Red Sea → ~1 day
         ("Yanbu",        "Red Sea",          1,  1.0,  7.00, 0.09, False),
 
-        # Red Sea → Bab-el-Mandeb: ~700nm → ~2 days
+        # Red Sea → Bab-el-Mandeb: ~700nm → ~2 days (southbound, Asia routing)
         # Bab-el-Mandeb pre-Houthi throughput 8.8 MBD (EIA 2023)
         # Risk 0.35 = 2024 Houthi-era elevated premium (down from peak 2.0% hull → 0.70% hull)
         ("Red Sea",      "Bab-el-Mandeb",    2,  2.0,  8.80, 0.35, False),
 
-        # Bab-el-Mandeb → Suez Canal: ~1,200nm → ~3.5 days
-        # Suez throughput 7.5 MBD normal capacity (IEA Factsheet); 3.9 MBD during Houthi disruption
-        # Risk 0.35 same corridor; SUMED pipeline (2.5 MBD) adds parallel capacity counted here
+        # Bab-el-Mandeb → Suez Canal: ships from Indian Ocean / Gulf of Aden going northbound
+        # (e.g. routed via IOH southbound then back north). ~1,200nm → ~3.5 days.
+        # Suez throughput 7.5 MBD normal capacity (IEA Factsheet)
+        # Risk 0.35 same Houthi-affected corridor
         ("Bab-el-Mandeb","Suez Canal",       3,  3.5,  7.50, 0.35, False),
 
         # ── Indian Ocean Hub → consumer legs ─────────────────────────────────

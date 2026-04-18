@@ -32,7 +32,7 @@ Not with a spreadsheet. Not with a think-tank white paper. With a working simula
 
 Every barrel of oil has a journey. It starts in a Gulf oilfield, moves through pipelines to a port, crosses open water through straits that have been strategically contested for centuries, and ends up refined into the fuel that powers the city you're reading this in. That journey is a logistics problem. And like every logistics problem, it can be modelled as a graph.
 
-We built that graph — 24 nodes, 24 directed edges, spanning Gulf producers, maritime chokepoints, pipeline bypass hubs, and consuming nations across Asia, Europe, and North America. Every edge carries real numbers: cost, transit time, throughput capacity, and a time-varying risk score calibrated to Lloyd's and S&P war-risk insurance premiums. Then we asked a simple question: what does the optimal route look like when the definition of "optimal" changes?
+We built that graph — 24 nodes, 25 directed edges, spanning Gulf producers, maritime chokepoints, pipeline bypass hubs, and consuming nations across Asia, Europe, and North America. Every edge carries real numbers: cost, transit time, throughput capacity, and a time-varying risk score calibrated to Lloyd's and S&P war-risk insurance premiums. Then we asked a simple question: what does the optimal route look like when the definition of "optimal" changes?
 
 That's v1. A risk-aware routing algorithm that treats geopolitical instability as a cost — the higher your risk aversion, the more expensive a dangerous edge becomes, until the algorithm quietly abandons Hormuz and reroutes through Bab-el-Mandeb and the Cape of Good Hope. A tabular reinforcement learning agent that doesn't just solve the routing problem once, but learns a policy — a generalised intuition about what to do under any combination of conditions. A Monte Carlo stress-tester that runs 500 disruption scenarios to put a number on what resilience actually costs. And an economic cascade model, because routing cost alone is still just an abstraction.
 
@@ -79,7 +79,7 @@ Iraq             Suez Canal   Cape of GH        Europe
 ```
 
 ```
-G = (V, E)   — 24 directed edges
+G = (V, E)   — 25 directed edges
 
 V: Saudi Arabia, UAE, Iraq, Kuwait, Qatar      ← producers
    Hormuz, Suez Canal, Bab-el-Mandeb,
@@ -111,23 +111,26 @@ The conventional approach minimises raw cost (`min Σ c(e)`). The risk-aware app
 
 ### Edge Topology
 
-The graph has 24 directed edges. Key structural properties:
+The graph has 25 directed edges. Key structural properties:
 
 **Hormuz funnel:** All five Gulf producers have a direct edge into the Hormuz node. Hormuz has a single outbound edge to Indian Ocean Hub at 20.0 MBD capacity — the bottleneck edge. All six of these edges are flagged `hormuz_dependent=True`.
 
 **Bypass routes:**
-- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, 7.0 MBD) `→ Red Sea → Bab-el-Mandeb → Indian Ocean Hub` (southbound to Indian Ocean) or `→ Suez Canal` (northbound to Europe/USA)
+- `Saudi Arabia → Yanbu` (Saudi East-West/Petroline, 7.0 MBD) — two onward paths depending on destination:
+  - **Northbound** `→ Suez Canal` directly (~3 days, risk 0.10) — for Europe and USA. Yanbu sits at 24°N; Suez at 30°N. Ships sail straight up the Red Sea, bypassing Bab-el-Mandeb and its Houthi exposure entirely.
+  - **Southbound** `→ Red Sea → Bab-el-Mandeb → Indian Ocean Hub` — for India, China, and Japan. Ships exit through the southern gate into the Indian Ocean.
 - `UAE → Fujairah` (ADCO/Habshan pipeline, 1.5 MBD, ADNOC) `→ Indian Ocean Hub` directly
 
-**Bypass graph is fully closed.** Saudi Arabia can reach India, China, and Japan without Hormuz via:
+**Bypass graph is fully closed.** Saudi Arabia can reach all consumers without Hormuz:
 
 ```
-Saudi Arabia → Yanbu → Red Sea → Bab-el-Mandeb → Indian Ocean Hub → [India / Malacca → China / Japan]
+Europe / USA:  Saudi Arabia → Yanbu → Suez Canal → [Europe / USA]
+India / Asia:  Saudi Arabia → Yanbu → Red Sea → Bab-el-Mandeb → Indian Ocean Hub → [India / Malacca → China / Japan]
 ```
 
 The Cape of Good Hope also connects onward to India and Malacca for extreme-scenario routing.
 
-**Critical connectivity note:** Bab-el-Mandeb → Indian Ocean Hub is the key edge enabling Saudi Arabia to reach Asia without transiting Hormuz. Without it, the Yanbu bypass terminates at Suez Canal and Asian consumers are unreachable by any Hormuz-free path.
+**Critical connectivity note:** The Yanbu bypass serves two structurally distinct functions. The northbound leg to Suez avoids both Hormuz and Bab-el-Mandeb risk — the cleanest bypass in the network. The southbound leg through Bab-el-Mandeb is the only Hormuz-free path to Asian consumers; `Bab-el-Mandeb → Indian Ocean Hub` is the edge that makes it possible.
 
 **Capacity constraints:** Capacity is stored per edge but is not enforced as a hard constraint in the current routing implementation — it is surfaced as a metric (bottleneck capacity along the chosen path). Full capacity-constrained routing would require min-cost max-flow.
 
@@ -218,7 +221,7 @@ $$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - 
 
 **The conclusion:** A system that learns from experience routes differently from one that optimises from scratch each time. The Q-learning agent develops something close to institutional memory — it knows to avoid Hormuz before the risk metric peaks, not after.
 
-**The limitation:** The state space is effectively infinite (19 × 5²⁴). The agent can only learn what it has seen. Anything outside its training experience gets a Q-value of zero — random behaviour precisely when the situation is most unusual and the stakes are highest.
+**The limitation:** The state space is effectively infinite (19 × 5²⁵). The agent can only learn what it has seen. Anything outside its training experience gets a Q-value of zero — random behaviour precisely when the situation is most unusual and the stakes are highest.
 
 **Results:**
 - Converges in ~300 episodes; reward curve plateaus and stabilises by episode 200–250
