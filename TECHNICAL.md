@@ -14,11 +14,12 @@
 4. [Routing Algorithm](#4-routing-algorithm)
 5. [Reinforcement Learning Agent](#5-reinforcement-learning-agent)
 6. [Stress Testing & Monte Carlo](#6-stress-testing--monte-carlo)
-7. [Visualisation Layer](#7-visualisation-layer)
-8. [Application Architecture](#8-application-architecture)
-9. [Data Flow End-to-End](#9-data-flow-end-to-end)
-10. [Limitations & Extensions](#10-limitations--extensions)
-11. [Concept Deep Dives](#11-concept-deep-dives)
+7. [Economic Cascade Model](#7-economic-cascade-model)
+8. [Visualisation Layer](#8-visualisation-layer)
+9. [Application Architecture](#9-application-architecture)
+10. [Data Flow End-to-End](#10-data-flow-end-to-end)
+11. [Limitations & Extensions](#11-limitations--extensions)
+12. [Concept Deep Dives](#12-concept-deep-dives)
 
 ---
 
@@ -463,7 +464,143 @@ for _ in range(500):
 
 ---
 
-## 7. Visualisation Layer
+## 7. Economic Cascade Model
+
+### 7.1 Motivation
+
+Routing cost is an operational abstraction. The question a policymaker, central banker, or food security minister needs answered is different: *what happens to the real economy* when Hormuz is disrupted? This model translates a disruption (characterised by severity and duration) into a quantified macro-economic impact chain.
+
+### 7.2 Oil Price Scenario (`oil_price_scenario`)
+
+**Inputs:** `hormuz_risk` (severity), `duration_days`, `base_price` (Brent crude USD/bbl)
+
+**Model:**
+
+```
+supply_disrupted = hormuz_risk × 0.20     # Hormuz ≈ 20% of global supply (EIA 2024)
+
+pct_change = net_disruption × dur_mult × 100 + panic × 100
+```
+
+**Duration multiplier** (calibrated to Abqaiq 2019 and Gulf War 1990):
+
+| Duration | Multiplier | Rationale |
+|----------|-----------|-----------|
+| ≤ 7 days | 3.5× | Markets expect short disruption; SPR can absorb |
+| 8–30 days | 5.5× | Strategic reserve deployment underway |
+| 31–90 days | 8.0× | Rerouting via Cape established; lingering premium |
+| > 90 days | 12.0× | Demand destruction + structural rebalancing |
+
+**Offsets:**
+- OPEC spare capacity: up to 35% of disrupted supply, capped at 7% of global supply (IEA Oil Market Report 2024 — ~3.5–4.5 MBD available)
+- IEA strategic reserve: 4 MBD release capacity for ~30 days (IEA Emergency Response Manual)
+- Panic premium: `max(0, (severity − 0.5) × 0.40 × 100%)` applied above severity=0.5
+
+**Freight premium model:**
+
+```
+cape_extra_cost = 14 days × $45,000/day bunker
+freight_premium = (cape_extra_cost / cargo_value) × 100 + hormuz_risk × 250
+```
+
+Calibrated to: 2019 Hormuz attacks (TD3C WS 60→300, +400%), Houthi period (+150%).
+
+**Sources:** Hamilton (2009) NBER; Kilian (2008) J. Econ. Literature; IEA Emergency Response Manual; EIA "How much of the retail price of gasoline is tax?"
+
+### 7.3 Inflation Cascade (`inflation_cascade`)
+
+Computes headline CPI, core CPI, food price, GDP, and rate hike impacts per region.
+
+**Regional parameters (5 regions):**
+
+| Region | Oil Import Dep. | CPI Pass-Through | GDP Elasticity | Food Dep. |
+|--------|----------------|-----------------|----------------|-----------|
+| East Asia (Japan/Korea/China) | 85% | 0.18 | −0.040 | 0.55 |
+| India | 85% | 0.16 | −0.050 | 0.48 |
+| Europe | 55% | 0.13 | −0.028 | 0.30 |
+| USA | 15% | 0.08 | −0.015 | 0.20 |
+| Developing Markets | 80% | 0.22 | −0.060 | 0.65 |
+
+**Sources:** IMF WP/17/53 (Gelos & Ustyugova 2017) — CPI pass-through; IEA Energy Security 2023; World Bank Commodity Markets Outlook 2022.
+
+**Per-region computation:**
+
+```
+eff_oil_chg  = oil_pct_change × import_dep
+headline_cpi = eff_oil_chg × cpi_pt
+core_cpi     = headline_cpi × 0.38          # second-round effects, 2–4 month lag
+
+food_chg     = energy_to_food               # 15% of oil chg (direct energy in production)
+             + fertilizer_cost              # gas-oil correlation (0.60) × food share (0.18)
+             + freight_to_food             # freight × food import dep
+             + panic_food                  # hoarding premium above 25% oil price rise
+
+direct_gdp   = eff_oil_chg × gdp_elast
+monetary_drag = −0.15 × max(0, headline_cpi − 0.5)   # CB rate hike effect
+total_gdp    = direct_gdp + monetary_drag
+
+rate_hike    = max(0, 1.5 × headline_cpi × 0.1)      # Taylor rule approximation
+```
+
+**Food price validation:** 2022 Russia sanctions — oil +60% → FAO food index +34% (elasticity ≈ 0.57). Model reproduces this at `oil_pct_change=60`.
+
+### 7.4 Economic Time Series (`economic_time_series`)
+
+Simulates day-by-day indicator evolution over 180 days using a 5-phase model:
+
+| Phase | Days | Oil Price Factor | Description |
+|-------|------|-----------------|-------------|
+| Shock | 0–3 | 0 → 1.0 (√ ramp) | Rapid price spike |
+| Peak | 4–7 | 1.0 | Plateau; reserves announced |
+| Reserve Deployment | 8–30 | 1.0 → 0.70 | SPR + OPEC moderation |
+| Cape Rerouting | 31–90 | 0.70 → 0.50 | New shipping equilibrium |
+| New Equilibrium | 91–180 | 0.50 → 0.40 | Demand destruction |
+| Recovery (post-disruption) | d > duration | Exponential decay | Snap-back + overshoot correction |
+
+**Lagged indicators:**
+- CPI: 30-day lag on oil price (supply chain pipeline pass-through)
+- Food prices: 45-day lag + freight component
+- Petrol at pump: 7-day lag (weekly repricing cycle)
+
+### 7.5 Monte Carlo Economic Distribution (`monte_carlo_economic`)
+
+Runs 500 random scenarios sampling:
+- `severity ~ U(0.30, 0.95)`
+- `duration` from `{3, 7, 14, 30, 60, 90, 180}` days
+
+Reports distribution of oil price change, global CPI, global food price, and global GDP impact. The 95th percentile of each distribution is the tail-risk figure planners should design for.
+
+### 7.6 Historical Calibration
+
+Seven real events are used to validate model coefficients:
+
+| Event | Duration | Oil Δ% | CPI Peak | Food Δ% | GDP Impact |
+|-------|----------|--------|---------|---------|-----------|
+| 1973 Arab Embargo | 150d | +400% | +11.0% | +30% | −2.5% |
+| 1979 Iranian Revolution | 365d | +150% | +13.5% | +20% | −3.5% |
+| 1990 Gulf War | 180d | +100% | +6.2% | +15% | −1.5% |
+| 2005 Hurricane Katrina | 30d | +25% | +3.4% | +5% | −0.3% |
+| 2019 Abqaiq Attack | 14d | +15% | +0.2% | +2% | −0.1% |
+| 2022 Russia Sanctions | 365d | +60% | +9.1% | +34% | −1.0% |
+| 2023–24 Houthi/Red Sea | 365d | +8% | +0.3% | +8% | −0.3% |
+
+Sources: Hamilton (1983, 2009); Kilian (2008 AER); IMF WEO Oct 2022; EIA/IEA 2024.
+
+### 7.7 UI Components (Economic Cascade Tab)
+
+| Component | Description |
+|-----------|-------------|
+| KPI metrics row (6 cols) | Brent crude spot, petrol price, freight premium, global CPI, food prices, GDP |
+| 6-month time series chart | Oil price, CPI, food prices, freight rates with phase annotations and disruption-end marker |
+| Regional bar charts (3 cols) | Headline CPI / food prices / GDP per region |
+| Full regional table | Import dependency, effective oil Δ, all indicators per region |
+| Sankey transmission chain | Hormuz → Oil Supply → Energy/Freight → Manufacturing/Food → CPI → Rate Hikes → GDP |
+| Historical comparison table + scatter | Current scenario vs 7 real events; linear trend line |
+| Monte Carlo histograms (3 cols) | Oil price / CPI / food price distributions with mean and current-scenario markers |
+
+---
+
+## 8. Visualisation Layer
 
 ### 7.1 Network Map (Plotly Scattergeo)
 
@@ -520,13 +657,13 @@ Episode rewards are plotted raw (thin, transparent) and with a rolling mean (thi
 
 ---
 
-## 8. Application Architecture
+## 9. Application Architecture
 
-### 8.1 Single-File Design
+### 9.1 Single-File Design
 
 All logic — graph construction, risk engine, routing, RL agent, visualisation, and UI — lives in `app.py`. This is intentional for a POC: no import machinery, no packaging, no relative path issues.
 
-### 8.2 Streamlit Session State
+### 9.2 Streamlit Session State
 
 Streamlit reruns the entire script on every user interaction. Mutable state that must persist across reruns is stored in `st.session_state`:
 
@@ -551,7 +688,7 @@ if "G" not in st.session_state:
     st.session_state.crisis     = False
 ```
 
-### 8.3 Sidebar Controls and Side Effects
+### 9.3 Sidebar Controls and Side Effects
 
 | Control | Effect |
 |---------|--------|
@@ -564,23 +701,26 @@ if "G" not in st.session_state:
 | 🔥 Hormuz Crisis | Calls `apply_hormuz_crisis(G, 0.90)`, sets `crisis=True` |
 | 🔄 Reset | Deletes all session state keys, calls `st.rerun()` |
 
-### 8.4 Tab Structure
+### 9.4 Tab Structure
 
 Each tab is a logical section of the interactive blog:
 
 ```
-tab1: Network Map      → draw_network() + path_stats()
-tab2: Route Finder     → risk_dijkstra() sweep over λ + Pareto chart
-tab3: Risk Simulator   → risk_hist time series charts
-tab4: Stress Test      → isolated G_normal/G_crisis + Monte Carlo loop
-tab5: RL Agent         → QLearningAgent.train() + greedy_path()
+tab1: Network Map        → draw_network() + path_stats()
+tab2: Route Finder       → risk_dijkstra() sweep over λ + Pareto chart
+tab3: Risk Simulator     → risk_hist time series charts
+tab4: Stress Test        → isolated G_normal/G_crisis + Monte Carlo loop
+tab5: RL Agent           → QLearningAgent.train() + greedy_path()
+tab6: Economic Cascade   → oil_price_scenario() + inflation_cascade() + economic_time_series()
+                           + monte_carlo_economic() + Sankey + historical comparison
+tab7: How It Works       → first-principles concept explainers
 ```
 
-Tabs 4 and 5 create their own isolated graph instances to avoid contaminating the live simulation graph `st.session_state.G`.
+Tabs 4, 5, and 6 create their own isolated graph instances or compute independently to avoid contaminating the live simulation graph `st.session_state.G`.
 
 ---
 
-## 9. Data Flow End-to-End
+## 10. Data Flow End-to-End
 
 ```
 User interaction (sidebar / button)
@@ -635,13 +775,31 @@ QLearningAgent.train(G, source, target, n_episodes)
       ]
   → rewards list → training curve chart
   → greedy_path(G, source, target) → compare vs Dijkstra
+
+─── Parallel: Economic Cascade (Tab 6) ──────────────────────
+oil_price_scenario(severity, duration, base_price)
+  └── supply disruption + duration multiplier + offsets → oil Δ%, freight premium
+
+inflation_cascade(oil_pct_change, freight_pct, duration)
+  └── per region: headline CPI, core CPI, food Δ, GDP impact, rate hike
+
+economic_time_series(severity, duration, base_price, n_days=180)
+  └── day-by-day: oil price, CPI (30d lag), food (45d lag), petrol (7d lag), freight
+  → multi-trace Plotly chart with phase annotations
+
+monte_carlo_economic(n=500, base_price)
+  └── 500 × [random severity, random duration → oil_price_scenario + inflation_cascade]
+  → DataFrames → 3× histogram with mean + current-scenario markers
+
+→ Sankey diagram (transmission chain)
+→ Historical comparison table + scatter
 ```
 
 ---
 
-## 10. Limitations & Extensions
+## 11. Limitations & Extensions
 
-### 10.1 Current Limitations (v1)
+### 11.1 Current Limitations (v1)
 
 | Limitation | Description | v2 Status |
 |------------|-------------|-----------|
@@ -650,9 +808,9 @@ QLearningAgent.train(G, source, target, n_episodes)
 | Simulated risk only | Risk is generated by OU process, not real signals. | **LSTM in v2** trains on correlated synthetic signals (oil vol, insurance, sentiment) |
 | Single-commodity flow | Model routes one flow at a time. Real logistics involves simultaneous multi-commodity flows. | Still open |
 | Q-table scalability | Tabular Q-learning doesn't scale — 19 × 5²⁴ theoretical state space, almost entirely unvisited. | **DQN in v2** generalises via neural interpolation |
-| No economic impact model | Routing optimisation tells you the path cost, not the macro consequences of disruption. | **Economic Cascade in v2** covers oil price → CPI → food → GDP |
+| Economic model uses simulated risk | `oil_price_scenario` uses the slider severity, not live graph risk — cascade is a scenario tool, not a live feed. | Accepted trade-off for legibility |
 
-### 10.2 Direct Extensions
+### 11.2 Direct Extensions
 
 **Capacity-constrained routing (Min-Cost Max-Flow):**
 
@@ -675,9 +833,9 @@ v2 replaces the tabular Q-function with a 3-layer neural network (41→256→128
 
 v2 trains a 2-layer LSTM on correlated synthetic risk signals (risk, oil volatility, insurance premium, sentiment) to predict next-step edge risks across all edges simultaneously. See `v2/TECHNICAL_V2.md §3`.
 
-**Economic cascade model:** *(implemented in v2)*
+**Economic cascade model:** *(implemented in v1 and v2)*
 
-v2 includes a full macro transmission model: oil price shock → freight premium → regional CPI → food prices → GDP contraction, calibrated to 7 historical disruptions with IMF WP/17/53 pass-through coefficients. See `v2/TECHNICAL_V2.md §12`.
+v1 includes a full macro transmission model: oil price shock → freight premium → regional CPI → food prices → GDP contraction, calibrated to 7 historical disruptions with IMF WP/17/53 pass-through coefficients. See §7 above for full specification.
 
 **Live data integration:**
 
@@ -705,11 +863,11 @@ Model "time until disruption" as a survival function with hazard rate λ(t) driv
 
 ---
 
-## 11. Concept Deep Dives
+## 12. Concept Deep Dives
 
 This section explains the core mathematical ideas from first principles — intended for readers who want to understand *why* each model is built the way it is, not just what it does.
 
-### 11.1 Graph Theory & Network Representation
+### 12.1 Graph Theory & Network Representation
 
 **What is a graph?**
 
@@ -739,7 +897,7 @@ A node with C_B → 1.0 is on *almost every* shortest path in the network. Remov
 
 ---
 
-### 11.2 Risk-Aware Dijkstra
+### 12.2 Risk-Aware Dijkstra
 
 **Standard Dijkstra:** finds minimum-weight path in O((V+E) log V) using a min-heap priority queue. Always expands the cheapest reachable node next. Proven optimal for non-negative edge weights.
 
@@ -764,7 +922,7 @@ At λ > λ*: bypass weighted cost < Hormuz weighted cost → bypass wins
 
 ---
 
-### 11.3 Ornstein-Uhlenbeck Risk Simulation
+### 12.3 Ornstein-Uhlenbeck Risk Simulation
 
 **Why risk must be modelled as a stochastic process:**
 
@@ -796,7 +954,7 @@ where ε ~ N(0,1)
 
 ---
 
-### 11.4 Q-Learning: From Table to Policy
+### 12.4 Q-Learning: From Table to Policy
 
 **The limitation of Dijkstra:** it solves the current graph state optimally, but has no memory. Every time the graph changes (risk evolves), Dijkstra recomputes from scratch. It cannot generalise across states.
 
@@ -848,4 +1006,4 @@ Episode 600:  ε = 0.05  (5% residual exploration — never fully greedy)
 ---
 
 *End of v1 Technical Document*  
-*See also: `v2/TECHNICAL_V2.md` (DQN + LSTM + Economic Cascade), `DATA_SOURCES.md` (real data citations)*
+*See also: `v2/TECHNICAL_V2.md` (LSTM + DQN upgrades), `DATA_SOURCES.md` (real data citations)*

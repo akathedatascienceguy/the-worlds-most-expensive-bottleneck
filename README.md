@@ -4,7 +4,7 @@
 
 > An interactive simulation where you can break the global oil network, watch it scramble in real time, and understand exactly what resilience costs.
 
-**Two versions.** v1 is a self-contained POC. v2 adds a trained neural risk predictor, a Deep Q-Network routing agent, and a full macro-economic cascade model.
+**Two versions.** v1 is a self-contained POC including a full economic cascade model. v2 upgrades the risk engine to a trained LSTM neural predictor and replaces the Q-learning agent with a Deep Q-Network.
 
 ---
 
@@ -34,13 +34,11 @@ Every barrel of oil has a journey. It starts in a Gulf oilfield, moves through p
 
 We built that graph — 24 nodes, 24 directed edges, spanning Gulf producers, maritime chokepoints, pipeline bypass hubs, and consuming nations across Asia, Europe, and North America. Every edge carries real numbers: cost, transit time, throughput capacity, and a time-varying risk score calibrated to Lloyd's and S&P war-risk insurance premiums. Then we asked a simple question: what does the optimal route look like when the definition of "optimal" changes?
 
-That's v1. A risk-aware routing algorithm that treats geopolitical instability as a cost — the higher your risk aversion, the more expensive a dangerous edge becomes, until the algorithm quietly abandons Hormuz and reroutes through Bab-el-Mandeb and the Cape of Good Hope. A tabular reinforcement learning agent that doesn't just solve the routing problem once, but learns a policy — a generalised intuition about what to do under any combination of conditions. And a Monte Carlo stress-tester that runs 500 disruption scenarios to put a number on what resilience actually costs.
+That's v1. A risk-aware routing algorithm that treats geopolitical instability as a cost — the higher your risk aversion, the more expensive a dangerous edge becomes, until the algorithm quietly abandons Hormuz and reroutes through Bab-el-Mandeb and the Cape of Good Hope. A tabular reinforcement learning agent that doesn't just solve the routing problem once, but learns a policy — a generalised intuition about what to do under any combination of conditions. A Monte Carlo stress-tester that runs 500 disruption scenarios to put a number on what resilience actually costs. And an economic cascade model, because routing cost alone is still just an abstraction.
 
-The answer is 30–50% more per barrel. Every time.
+The routing premium is 30–50% more per barrel. Every time. But that's only the tanker's bill. The Hormuz disruption doesn't stop at shipping costs — it spikes oil prices, inflates freight premiums, passes through into consumer prices, disrupts food supply chains, triggers central bank responses, and ultimately contracts GDP — differently, in each region of the world. We modelled all of it, across five global regions, with Monte Carlo quantification of the tail-risk outcomes that planners should actually be designing for.
 
-v2 goes further. The risk model — previously a mathematical formula — is replaced by a trained neural network: a two-layer LSTM that learns to predict rising risk from structured signals before the market has finished pricing it in. News sentiment leads a crisis by 3–5 steps. Insurance premiums lag it by 7. The model learns the difference, and routes accordingly. The reinforcement learning agent becomes a Deep Q-Network, operating over a continuous 43-dimensional state space — finally capable of generalising to conditions it has never seen before.
-
-And then, because routing cost alone is still just an abstraction, we built an economic cascade model. A Hormuz disruption doesn't just reroute tankers. It spikes oil prices, inflates freight premiums, passes through into consumer prices, disrupts food supply chains, triggers central bank responses, and ultimately contracts GDP — differently, in each region of the world. We modelled all of it, across five global regions, with Monte Carlo quantification of the tail-risk outcomes that planners should actually be designing for.
+v2 goes further on the algorithmic side. The risk model — previously a mathematical formula — is replaced by a trained neural network: a two-layer LSTM that learns to predict rising risk from structured signals before the market has finished pricing it in. News sentiment leads a crisis by 3–5 steps. Insurance premiums lag it by 7. The model learns the difference, and routes accordingly. The reinforcement learning agent becomes a Deep Q-Network, operating over a continuous 43-dimensional state space — finally capable of generalising to conditions it has never seen before.
 
 The whole thing runs in a Streamlit browser app. Trigger a crisis with a button. The graph re-routes. The cascade unfolds. The numbers update.
 
@@ -290,7 +288,7 @@ Replaces the Q-table with a neural network that generalises across a continuous 
 
 ---
 
-### Economic Cascade Model (v2)
+### Economic Cascade Model (v1 + v2)
 
 Because routing cost alone is still just an abstraction. A Hormuz disruption doesn't just reroute tankers — it spikes oil prices, inflates freight premiums, passes through into consumer prices, disrupts food supply chains, triggers central bank responses, and ultimately contracts GDP — differently, in each region of the world. Modelled across five global regions, with Monte Carlo quantification of tail-risk outcomes.
 
@@ -325,15 +323,15 @@ Because routing cost alone is still just an abstraction. A Hormuz disruption doe
 
 Each algorithm illuminates a different dimension of the same problem:
 
-| Algorithm | What it answers | Key result |
-|-----------|----------------|------------|
-| Dijkstra | What is the optimal route, and what does safety cost? | Switchover at λ≈15; bypass costs +62% |
-| OU Process | How does risk evolve, and how long do you have? | Crisis decays in ~10–15 ticks; window exists |
-| Monte Carlo | What does the tail look like across 500 scenarios? | 100% rerouting above severity 0.75; +30–50% cost |
-| Q-Learning | Can a system learn crisis-regime behaviour? | Yes — but only if trained on the right risk buckets |
-| LSTM | Can you see a crisis before the market does? | 7 steps of advance warning from sentiment signal |
-| DQN | Does the policy generalise to novel conditions? | Yes — 100% bypass rate vs ~60% for tabular agent |
-| Cascade | What does failure do to the real economy? | East Asia takes 4× the GDP hit of the USA |
+| Algorithm | Version | What it answers | Key result |
+|-----------|---------|----------------|------------|
+| Dijkstra | v1 + v2 | What is the optimal route, and what does safety cost? | Switchover at λ≈15; bypass costs +62% |
+| OU Process | v1 + v2 | How does risk evolve, and how long do you have? | Crisis decays in ~10–15 ticks; window exists |
+| Monte Carlo | v1 + v2 | What does the tail look like across 500 scenarios? | 100% rerouting above severity 0.75; +30–50% cost |
+| Q-Learning | v1 | Can a system learn crisis-regime behaviour? | Yes — but only if trained on the right risk buckets |
+| Economic Cascade | v1 + v2 | What does failure do to the real economy? | East Asia takes 4× the GDP hit of the USA |
+| LSTM | v2 | Can you see a crisis before the market does? | 7 steps of advance warning from sentiment signal |
+| DQN | v2 | Does the policy generalise to novel conditions? | Yes — 100% bypass rate vs ~60% for tabular agent |
 
 Taken together: **the system works, the rerouting is possible, the bypass exists — and the market will not pay for it until it has no choice.** Every algorithm confirms a different facet of that same structural problem.
 
@@ -376,6 +374,8 @@ streamlit run v2/app_v2.py
 | 📡 Risk Simulator | Step through stochastic risk evolution; watch paths adapt in real time |
 | 🔥 Stress Test | Trigger a Hormuz crisis; run 500 Monte Carlo disruption scenarios |
 | 🤖 RL Agent | Train a tabular Q-learning agent; compare its learned policy to Dijkstra |
+| 📉 Economic Cascade | Hormuz disruption → oil price → freight → CPI → food → GDP; 5-region breakdown; Sankey transmission chain; historical calibration; Monte Carlo tail risk |
+| 📖 How It Works | First-principles explainers for every model in the app |
 
 ## v2 — App Sections
 
@@ -416,5 +416,5 @@ v2/
 
 ---
 
-*v1 stack: NetworkX · Plotly · Streamlit · NumPy · Pandas*  
-*v2 stack: above + PyTorch · scikit-learn*
+*v1 stack: NetworkX · Plotly · Streamlit · NumPy · Pandas — includes economic cascade model*  
+*v2 stack: above + PyTorch · scikit-learn — upgrades to LSTM risk engine and DQN routing agent*
