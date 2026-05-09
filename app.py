@@ -1921,6 +1921,3 @@ st.markdown("""
 
 if _analytics_available:
     streamlit_analytics.stop_tracking()
-
-# ── Close analytics tracker ───────────────────────────────────────────────────
-streamlit_analytics.stop_tracking()
