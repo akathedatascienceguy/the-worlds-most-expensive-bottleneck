@@ -398,7 +398,8 @@ streamlit run v2/app_v2.py
 ```
 app.py                  ← v1 Streamlit app (self-contained)
 requirements.txt        ← v1 dependencies
-blog.md                 ← technical blog post
+blog.md                 ← v1 technical blog post
+blog_v2.md              ← v2 technical blog post (LSTM + DQN)
 TECHNICAL.md            ← v1 technical report
 DATA_SOURCES.md         ← real data citations for all parameters
 
@@ -412,7 +413,8 @@ v2/
 
 ## Read More
 
-- [`blog.md`](blog.md) — full technical narrative
+- [`blog.md`](blog.md) — v1 technical narrative
+- [`blog_v2.md`](blog_v2.md) — v2 technical narrative (LSTM + DQN + anticipatory routing)
 - [`TECHNICAL.md`](TECHNICAL.md) — v1 implementation details
 - [`v2/TECHNICAL_V2.md`](v2/TECHNICAL_V2.md) — v2 implementation (LSTM, DQN, economic cascade)
 - [`DATA_SOURCES.md`](DATA_SOURCES.md) — all real data citations
