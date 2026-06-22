@@ -1,6 +1,44 @@
-# Seven Steps Ahead: Teaching the Bottleneck to Think
+# The World's Most Expensive Bottleneck: Second Edition
 
 *Written by Yash Vardhan Gupta and Nikita Gupta*
+
+---
+
+*A note before you read: this project began as a simulation of a hypothetical crisis. By the time we published it, the crisis had arrived. What follows is the story of what we built — and what the world confirmed.*
+
+---
+
+## When the Simulation Became Real
+
+*Written in late 2025. This section added June 2026.*
+
+On February 28, 2026, the United States and Israel launched airstrikes on Iran. Within days, the IRGC issued warnings forbidding passage through the Strait of Hormuz, boarded merchant vessels, and laid sea mines in the channel. By May, open transits had fallen to near zero. The strait that carried 20% of the world's seaborne oil — the one we had been modelling as a hypothetical catastrophe — closed.
+
+We built a simulation. The world ran the real thing.
+
+Here is what we got right.
+
+**The bypass gap was real, and it showed immediately.** The Saudi East-West pipeline hit its 7 MBD capacity milestone in March 2026 — exactly the figure we used. Saudi Arabia maxed it out within days of the crisis beginning. But here is what our model underestimated: of those 7 MBD arriving at Yanbu, approximately 3 MBD are consumed by domestic refineries and power plants. Net export capacity through the Yanbu terminals is closer to 4 MBD. Against 20 MBD of disrupted Hormuz flow, the real bypass gap is not 65%. It is closer to 80%.
+
+**The cascade unfolded in the sequence we modelled.** Oil prices surged toward $98–132 per barrel. War-risk insurance premiums moved from 0.125% to 2.5% of hull value per seven-day period — and for some stranded tankers in mid-March, to 10% for a single voyage. Consumer prices followed. The IMF cut global growth forecasts. East Asia scrambled for alternative supply. The United States, producing 13 million barrels a day domestically, remained comparatively insulated. The geographic asymmetry we modelled was not a model artefact. It was the story on the front page.
+
+**The λ switchover happened in hours, not weeks.** Every major carrier went to Cape of Good Hope routing the moment Hormuz became genuinely dangerous. The threshold the algorithm predicted — the precise point where bypass becomes cheaper in risk-adjusted terms — was crossed in real time, by real shipping companies, making real decisions with real money.
+
+**The signals were there before the crisis peaked.** In the weeks before February 28, sentiment indicators in Gulf-related news were deteriorating. AIS data showed unusual vessel clustering near Omani coastal waters. Insurance premiums were already rising before the strikes happened. The exact leading-signal structure the LSTM was designed to read was present, in real data, in the real world. Whether any system actually used it to reroute early is a different question. Most didn't.
+
+---
+
+Here is what we did not model — and what we are building into v2 next.
+
+**Private insurance markets didn't just get expensive. They withdrew.** P&I insurance — the liability coverage that protects ship owners against third-party claims — was cancelled for Gulf transits entirely from March 5. Ships that attempted the strait operated without standard P&I cover. This is not a cost increase. It is a different category of risk entirely. Our cascade model accounted for rising premiums. It did not account for the market simply closing.
+
+**Governments became insurers of last resort.** When Lloyd's withdrew, the Trump administration directed the US International Development Finance Corporation to provide up to $40 billion in political risk reinsurance. Sovereign capital backstopping commercial shipping risk is a dynamic that does not exist in our model. It should.
+
+**The pipeline got attacked.** In early April, the Saudi East-West pipeline — the primary bypass, the one we described as the most important alternative to Hormuz — was struck. Saudi Arabia restored it to full capacity within days, but the episode revealed something our static graph topology cannot represent: bypass infrastructure is not guaranteed to remain intact during the crisis it exists to mitigate. Edges can disappear. Our model assumes they don't.
+
+**The economic tail was worse than our 95th percentile.** Our Monte Carlo simulation put the worst-case GDP impact at −2.5% to −4.0%. The Dallas Fed estimated a −2.9% annualised hit to global GDP in Q2 2026 alone, with prolonged disruption projections reaching −4.38% of global GDP at risk — $4.81 trillion. We were in the right range. But the right range for a tail event is cold comfort when you are living inside it.
+
+The simulation was right about the structure. The world provided the numbers. The rest of this blog is the story of how we built it — and what we are updating now that we know what actually happens.
 
 ---
 
