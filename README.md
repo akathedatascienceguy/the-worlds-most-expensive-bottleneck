@@ -360,7 +360,7 @@ streamlit run app.py
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r v2/requirements_v2.txt
+pip install -r v2/requirements.txt
 streamlit run v2/app_v2.py
 ```
 
@@ -376,7 +376,6 @@ streamlit run v2/app_v2.py
 | 🛣️ Route Finder | Sweep λ (risk aversion) and watch the path switch from Hormuz to bypass routes |
 | 📡 Risk Simulator | Step through stochastic risk evolution; watch paths adapt in real time |
 | 🔥 Stress Test | Trigger a Hormuz crisis; run 500 Monte Carlo disruption scenarios |
-| 🤖 RL Agent | Train a tabular Q-learning agent; compare its learned policy to Dijkstra |
 | 📉 Economic Cascade | Hormuz disruption → oil price → freight → CPI → food → GDP; 5-region breakdown; Sankey transmission chain; historical calibration; Monte Carlo tail risk |
 | 📖 How It Works | First-principles explainers for every model in the app |
 
@@ -388,7 +387,7 @@ streamlit run v2/app_v2.py
 | 🛣️ Route Finder | λ sweep with DQN routing vs Dijkstra comparison |
 | 📡 Risk Simulator | LSTM predicts next-step risk; OU fallback before training |
 | 🔥 Stress Test | Crisis scenarios with DQN re-routing |
-| 🤖 DQN Agent | Train neural agent with replay buffer + target network; inspect Q-value heatmap |
+| 🤖 DQN Agent | Train the tabular Q-learning baseline first, watch it break at scale, then train the DQN — replay buffer + target network; compare both against Dijkstra; inspect Q-value heatmap |
 | 📉 Economic Cascade | Hormuz disruption → oil price → freight → CPI → food → GDP; 5-region breakdown; Monte Carlo tail risk |
 
 ---
@@ -405,7 +404,7 @@ DATA_SOURCES.md         ← real data citations for all parameters
 
 v2/
   app_v2.py             ← v2 Streamlit app (self-contained, PyTorch)
-  requirements_v2.txt   ← v2 dependencies (adds torch, scikit-learn)
+  requirements.txt      ← v2 dependencies (adds torch, scikit-learn)
   TECHNICAL_V2.md       ← v2 technical report (LSTM + DQN + Economic Cascade)
 ```
 
