@@ -62,8 +62,6 @@ The whole thing runs in a Streamlit browser app. No installation, no setup, no c
 
 4. Go to the **Economic Cascade** and set the disruption duration. Watch a shipping event turn into a CPI number, a food price spike, a GDP contraction — region by region, day by day, across 500 simulated scenarios.
 
-5. The **RL Agent** tab is for the technically curious. Train the agent, watch the reward curve climb as it stops guessing and starts learning, then compare its learned policy against Dijkstra under normal conditions and under crisis. Under normal conditions they usually agree. Under crisis is where they diverge — and where the difference between a reactive system and an adaptive one becomes concrete.
-
 All numeric parameters are sourced from real data: EIA throughput figures, CEIC/FRED export volumes, Lloyd's/S&P war-risk insurance premiums, and Signal Group freight rates. See `DATA_SOURCES.md` for full citations.
 
 **Give it a go yourself:** [the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)

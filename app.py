@@ -55,7 +55,6 @@ RISK COLUMN: calibrated to war-risk insurance premium bands (see TECHNICAL.md §
 
 import heapq
 import random
-from collections import defaultdict
 
 import networkx as nx
 import numpy as np
@@ -578,131 +577,6 @@ def path_stats(G: nx.DiGraph, path: list) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Q-LEARNING AGENT
-# ──────────────────────────────────────────────────────────────────────────────
-
-class QLearningAgent:
-    def __init__(self, alpha: float = 0.15, gamma: float = 0.9, epsilon: float = 0.5):
-        self.alpha   = alpha
-        self.gamma   = gamma
-        self.epsilon = epsilon
-        self.Q: dict = defaultdict(float)
-
-    def _state(self, G: nx.DiGraph, node: str) -> tuple:
-        # Compact state: node + global Hormuz risk bucket (5 levels: 0/0.25/0.5/0.75/1.0)
-        # Gives 19×5 = 95 reachable states — fully explorable in a few hundred episodes.
-        # Full 24-edge encoding (5^24 states) is never covered and produces identical
-        # greedy paths every run due to universal Q=0 tie-breaking.
-        hormuz_risks = [G[u][v]["risk"] for u, v in G.edges()
-                        if G[u][v].get("hormuz_dependent")]
-        avg = float(np.mean(hormuz_risks)) if hormuz_risks else 0.0
-        return (node, round(avg * 4) / 4)
-
-    def _act(self, G: nx.DiGraph, node: str,
-             exclude: set | None = None, target: str | None = None) -> str | None:
-        neighbors = [
-            n for n in G.neighbors(node)
-            if n not in (exclude or set())
-            # never enter a consumer dead-end that isn't the destination
-            and (G.nodes[n].get("type") != "consumer" or n == target)
-        ]
-        if not neighbors:
-            return None
-        if random.random() < self.epsilon:
-            return random.choice(neighbors)
-        state  = self._state(G, node)
-        q_vals = [self.Q[(state, a)] for a in neighbors]
-        max_q  = max(q_vals)
-        # random tie-break so equal-Q neighbors don't always resolve to same node
-        best   = [n for n, q in zip(neighbors, q_vals) if q == max_q]
-        return random.choice(best)
-
-    def _update(self, G: nx.DiGraph, s: str, action: str, reward: float, ns: str) -> None:
-        state      = self._state(G, s)
-        next_state = self._state(G, ns)
-        next_nbrs  = list(G.neighbors(ns))
-        best_next  = max((self.Q[(next_state, a)] for a in next_nbrs), default=0.0)
-        self.Q[(state, action)] += self.alpha * (
-            reward + self.gamma * best_next - self.Q[(state, action)]
-        )
-
-    def _episode(self, G: nx.DiGraph, source: str, target: str,
-                 max_steps: int = 30) -> tuple[list, float]:
-        node      = source
-        path      = [node]
-        total     = 0.0
-        seen      = {node}
-        prev_node   = None
-        prev_action = None
-        for _ in range(max_steps):
-            if node == target:
-                break
-            action = self._act(G, node, exclude=seen, target=target)
-            if action is None or not G.has_edge(node, action):
-                # Dead end — penalise the move that led here so the agent
-                # learns to avoid routing into nodes with no onward path
-                # to the target (e.g. Suez Canal when target is Japan).
-                if prev_node is not None and prev_action is not None:
-                    self._update(G, prev_node, prev_action, -100.0, node)
-                break
-            e      = G[node][action]
-            reward = -(e["cost"] + 40 * e["risk"] + 2 * e["time"])
-            if action == target:
-                reward += 100.0
-            self._update(G, node, action, reward, action)
-            seen.add(action)
-            path.append(action)
-            total += reward
-            prev_node   = node
-            prev_action = action
-            node = action
-        return path, total
-
-    def train(self, G: nx.DiGraph, source: str, target: str,
-              episodes: int = 300) -> list[float]:
-        rewards = []
-        edges = list(G.edges())
-        for ep in range(episodes):
-            self.epsilon = max(0.05, self.epsilon * 0.994)
-            # Perturb risks each episode so the agent trains across all
-            # Hormuz risk buckets (low/medium/high/crisis), not just base risk.
-            # Without this every episode sees the same state → Q-table has
-            # identical entries → greedy path always matches Dijkstra.
-            saved = {(u, v): G[u][v]["risk"] for u, v in edges}
-            # Cycle through 4 phases, each targeting a distinct Hormuz risk
-            # bucket so all 4 state buckets (0.25 / 0.5 / 0.75 / 1.0) are
-            # trained. Bucket = round(avg_hormuz_risk × 4) / 4:
-            #   phase 0 → bucket 0.25  (base ≈ 0.28)
-            #   phase 1 → bucket 0.50  (base + 0.22 ≈ 0.50)
-            #   phase 2 → bucket 0.75  (hdep → 0.76)
-            #   phase 3 → bucket 1.00  (hdep → 0.93)  ← matches severity 0.90
-            phase = (ep % 4)
-            for u, v in edges:
-                base = G[u][v]["base_risk"]
-                hdep = G[u][v].get("hormuz_dependent", False)
-                if phase == 0:   # normal          → bucket 0.25
-                    G[u][v]["risk"] = float(np.clip(base + np.random.normal(0, 0.04), 0, 1))
-                elif phase == 1: # elevated tension → bucket 0.50
-                    bump = 0.22 if hdep else 0.05
-                    G[u][v]["risk"] = float(np.clip(base + bump + np.random.normal(0, 0.04), 0, 1))
-                elif phase == 2: # serious crisis   → bucket 0.75
-                    G[u][v]["risk"] = float(np.clip((0.76 if hdep else base) + np.random.normal(0, 0.04), 0, 1))
-                else:            # extreme crisis   → bucket 1.00
-                    G[u][v]["risk"] = float(np.clip((0.93 if hdep else base) + np.random.normal(0, 0.03), 0, 1))
-            _, r = self._episode(G, source, target)
-            for u, v in edges:  # restore original risks
-                G[u][v]["risk"] = saved[(u, v)]
-            rewards.append(r)
-        return rewards
-
-    def greedy_path(self, G: nx.DiGraph, source: str, target: str) -> list:
-        old, self.epsilon = self.epsilon, 0.0
-        path, _ = self._episode(G, source, target)
-        self.epsilon = old
-        return path
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 # VISUALIZATION HELPERS
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -809,8 +683,6 @@ if "G" not in st.session_state:
     st.session_state.G           = build_oil_network()
     st.session_state.t           = 0
     st.session_state.risk_hist   = []
-    st.session_state.rl_agent    = None
-    st.session_state.rl_rewards  = []
     st.session_state.crisis      = False
 
 G = st.session_state.G
@@ -879,7 +751,7 @@ with st.sidebar:
         })
 
     if st.button("🔄 Reset", use_container_width=True):
-        for key in ["G", "t", "risk_hist", "rl_agent", "rl_rewards", "crisis"]:
+        for key in ["G", "t", "risk_hist", "crisis"]:
             del st.session_state[key]
         st.rerun()
 
@@ -905,12 +777,11 @@ st.markdown("---")
 # TABS
 # ──────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab6, tab7 = st.tabs([
     "🗺️ Network Map",
     "🛣️ Route Finder",
     "📡 Risk Simulator",
     "🔥 Stress Test",
-    "🤖 RL Agent",
     "📉 Economic Cascade",
     "📖 How It Works",
 ])
@@ -1221,165 +1092,6 @@ with tab4:
 
     > The network *can* adapt — but resilience is expensive. Every extra day and dollar is the premium you pay for not having built redundancy upfront.
     """)
-
-
-# ── TAB 5 · RL AGENT ─────────────────────────────────────────────────────────
-with tab5:
-    st.markdown("## 🤖 Reinforcement Learning: From Pathfinding to Policy")
-    st.markdown(r"""
-    Dijkstra answers: *"What's the best route right now?"*
-
-    The RL agent answers: *"How should I route in general, across many risk conditions?"*
-
-    It learns a **Q-function** — a value estimate for every (state, action) pair:
-
-    ```
-    Q(s,a) ← Q(s,a) + α[r + γ·max_a' Q(s',a') − Q(s,a)]
-    ```
-
-    **Reward signal:**
-    ```
-    R(edge) = -(cost + 40·risk + 2·time)
-    R(reaching target) += +100
-    ```
-
-    The agent explores randomly at first (high ε), then exploits learned knowledge (ε → 0.05).
-    """)
-
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        n_episodes = st.slider("Training Episodes", 100, 1000, 300, 50)
-        if st.button("🎯 Train Agent", type="primary", use_container_width=True):
-            with st.spinner(f"Training Q-Learning agent for {n_episodes} episodes..."):
-                agent   = QLearningAgent(alpha=0.15, gamma=0.9, epsilon=0.5)
-                rewards = agent.train(G, source, target, episodes=n_episodes)
-                st.session_state.rl_agent   = agent
-                st.session_state.rl_rewards = rewards
-            st.success("Training complete!")
-
-    with c2:
-        if st.session_state.rl_rewards:
-            rews     = st.session_state.rl_rewards
-            window   = max(10, len(rews) // 20)
-            smoothed = pd.Series(rews).rolling(window, min_periods=1).mean()
-
-            fig_rl = go.Figure()
-            fig_rl.add_trace(go.Scatter(
-                y=rews, mode="lines", name="Episode Reward",
-                line=dict(color="#3498DB", width=1), opacity=0.35,
-            ))
-            fig_rl.add_trace(go.Scatter(
-                y=smoothed, mode="lines", name=f"Rolling Mean (w={window})",
-                line=dict(color="#F39C12", width=2),
-            ))
-            fig_rl.update_layout(
-                **_DARK,
-                title="Training Reward Curve — Agent Improving Over Episodes",
-                xaxis_title="Episode", yaxis_title="Total Episode Reward",
-                height=320,
-            )
-            st.plotly_chart(fig_rl, use_container_width=True)
-        else:
-            st.info("Train the agent above to see the learning curve.")
-
-    if st.session_state.rl_agent:
-        st.markdown("---")
-        st.markdown("### Learned Policy vs Dijkstra")
-        st.markdown("""
-        The comparison is shown across **two scenarios**. Under normal conditions both methods
-        often agree — that's expected. The difference emerges under crisis, where the RL agent
-        uses a *pre-learned policy* for the high-risk regime it trained on, while Dijkstra
-        recomputes from scratch on the degraded graph.
-        """)
-
-        agent = st.session_state.rl_agent
-
-        # ── Scenario A: current live graph (normal / stepped) ─────────────────
-        st.markdown("#### Scenario A — Current Graph State (normal conditions)")
-        rl_path_n   = agent.greedy_path(G, source, target)
-        _, d_path_n = risk_dijkstra(G, source, target, alpha, lam)
-
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            st.markdown("**🤖 RL Agent**")
-            st.code(" → ".join(rl_path_n) if rl_path_n else "No path found")
-            for k, v in path_stats(G, rl_path_n).items():
-                st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
-        with col_r2:
-            st.markdown("**🗺️ Dijkstra**")
-            st.code(" → ".join(d_path_n) if d_path_n else "No path found")
-            for k, v in path_stats(G, d_path_n).items():
-                st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
-
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.plotly_chart(draw_network(G, path=rl_path_n, title="RL — Normal"),
-                            use_container_width=True)
-        with col_m2:
-            st.plotly_chart(draw_network(G, path=d_path_n, title="Dijkstra — Normal"),
-                            use_container_width=True)
-
-        # ── Scenario B: Hormuz crisis on a fresh graph ────────────────────────
-        st.markdown("---")
-        st.markdown("#### Scenario B — Hormuz Crisis (severity 0.90)")
-        st.caption("Fresh graph with crisis applied — neither method has seen this exact state before. "
-                   "RL uses its pre-trained crisis-regime policy; Dijkstra recomputes optimally.")
-
-        G_crisis = build_oil_network()
-        apply_hormuz_crisis(G_crisis, severity=0.90)
-
-        rl_path_c   = agent.greedy_path(G_crisis, source, target)
-        _, d_path_c = risk_dijkstra(G_crisis, source, target, alpha, lam)
-
-        same = (rl_path_c == d_path_c)
-        if same:
-            st.info("🤝 Both methods chose the same bypass route under crisis — "
-                    "the agent's learned policy matches Dijkstra's optimal solution.")
-        else:
-            st.success("✅ Crisis reveals the difference: RL and Dijkstra diverge on routing strategy.")
-
-        col_r3, col_r4 = st.columns(2)
-        with col_r3:
-            st.markdown("**🤖 RL Agent**")
-            st.code(" → ".join(rl_path_c) if rl_path_c else "No path found")
-            rl_cs = path_stats(G_crisis, rl_path_c)
-            for k, v in rl_cs.items():
-                st.metric(k, "⚠️ YES" if v is True else ("✅ NO" if v is False else str(v)))
-        with col_r4:
-            st.markdown("**🗺️ Dijkstra**")
-            st.code(" → ".join(d_path_c) if d_path_c else "No path found")
-            d_cs = path_stats(G_crisis, d_path_c)
-            dij_rl = path_stats(G_crisis, rl_path_c)
-            for k, v in d_cs.items():
-                bv = dij_rl.get(k)
-                if k == "Hormuz Exposed":
-                    st.metric(k, "⚠️ YES" if v else "✅ NO")
-                elif isinstance(bv, (int, float)) and isinstance(v, (int, float)):
-                    st.metric(k, str(v), delta=round(v - bv, 2),
-                              delta_color="inverse" if k in ("Cost", "Transit (days)", "Max Risk", "Avg Risk") else "normal")
-                else:
-                    st.metric(k, str(v))
-
-        col_m3, col_m4 = st.columns(2)
-        with col_m3:
-            st.plotly_chart(draw_network(G_crisis, path=rl_path_c, title="RL — Crisis"),
-                            use_container_width=True)
-        with col_m4:
-            st.plotly_chart(draw_network(G_crisis, path=d_path_c, title="Dijkstra — Crisis"),
-                            use_container_width=True)
-
-        st.info("""
-        💡 **The key difference is not the path — it's the mechanism.**
-        Dijkstra recomputes from scratch every time the graph changes (O((V+E) log V) per query).
-        The RL agent does a single Q-table lookup — instant, regardless of graph size.
-        In a real deployment with continuous risk updates, that lookup speed is the advantage.
-        The agent also learned its crisis-regime policy *without* being told λ — it discovered
-        the cost-risk tradeoff purely through reward signals.
-        """)
-
-    else:
-        st.info("👆 Train the agent first to compare it against Dijkstra.")
-
 
 # ── TAB 6 · ECONOMIC CASCADE ─────────────────────────────────────────────────
 with tab6:
@@ -1829,52 +1541,7 @@ At 1.0 risk swings wildly every tick. Real-world volatility sits around 0.3–0.
 during periods of elevated tension.
         """)
 
-    # ── 4. Q-Learning ─────────────────────────────────────────────────────────
-    with st.expander("🤖 Q-Learning — Teaching an Agent to Route"):
-        st.markdown(r"""
-**Analogy:** Imagine learning to drive in a city you've never seen. At first you turn randomly.
-Over time you learn which turns lead to fast routes and which lead to dead ends. You don't
-memorise a single path — you build an *intuition* (a policy) for every intersection you might face.
-That's Q-learning.
-
-**The MDP setup:**
-
-| Component | Definition |
-|-----------|-----------|
-| **State** $s$ | Where the agent is + current Hormuz risk level |
-| **Action** $a$ | Which node to move to next |
-| **Reward** $R$ | $-(cost + 40 \cdot risk + 2 \cdot time)$ + 100 if reached target |
-| **Goal** | Maximise total reward across the journey |
-
-**The Q-function:** $Q(s, a)$ = "how good is it to take action $a$ from state $s$?"
-
-After taking action $a$, moving to state $s'$, and getting reward $r$, we update:
-
-$$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
-
-| Symbol | Meaning |
-|--------|---------|
-| $\alpha$ | Learning rate — how much to shift toward new information (0.15) |
-| $\gamma$ | Discount factor — how much to value future vs immediate rewards (0.9) |
-| $r + \gamma \max Q(s',a')$ | Bellman target — what Q *should* be |
-| The bracket | TD error — the surprise, used to nudge Q toward the target |
-
-**Exploration vs exploitation (ε-greedy):**
-
-```
-With probability ε  → take a RANDOM action (explore)
-With probability 1-ε → take the BEST KNOWN action (exploit)
-```
-
-ε starts at 0.5 (50% random) and decays to 0.05 as training progresses.
-This ensures the agent explores the graph before committing to a fixed route.
-
-**What the agent learns:** not a single path, but a *policy table* — a lookup that
-maps (node, risk_level) → best_next_node. At inference time, routing is a table
-lookup, not a graph search.
-        """)
-
-    # ── 5. Betweenness Centrality ──────────────────────────────────────────────
+    # ── 4. Betweenness Centrality ─────────────────────────────────────────────
     with st.expander("🔴 Why Hormuz is a Single Point of Failure — Betweenness Centrality"):
         st.markdown("""
 **Betweenness centrality** measures how often a node appears on the shortest path
@@ -1913,7 +1580,7 @@ CB close to 1.0 is a choke the whole network depends on. Redundancy means buildi
 st.markdown("---")
 st.markdown("""
 <div style='text-align:center; color:#8b949e; font-size:0.82em; padding-bottom:1rem'>
-    Built with NetworkX · Plotly · Streamlit · Q-Learning<br>
+    Built with NetworkX · Plotly · Streamlit<br>
     Graph: G=(V,E) where V = ports/chokepoints, E = shipping lanes with dynamic risk weights<br>
     Objective: min Σ[cost(e) + α·time(e) + λ·risk(e,t)]
 </div>

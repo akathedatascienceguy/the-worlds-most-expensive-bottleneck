@@ -6,14 +6,18 @@ What's new vs v1:
 ──────────────────────────────────────────────────────────────────
 1. LSTM Risk Predictor  — trained neural network replaces OU simulation.
    Input:  sliding window of (risk, oil_vol, insurance, sentiment) per edge
-   Output: predicted r(e, t+1) for all 22 edges
+   Output: predicted r(e, t+1) for all 24 edges
    Train:  MSE loss on synthetic data that mimics real signal structure
 
-2. Deep Q-Network (DQN) — neural network Q-function replaces tabular dict.
-   State:  one-hot node embedding (19) + LSTM risk vector (22) = 41 dims
-   Hidden: 256 → 128 → n_actions (19), ReLU + LayerNorm
-   Training extras: experience replay (10k buffer), target network, Huber loss,
-                    gradient clipping, ε-decay schedule
+2. RL routing moves here. v1 shipped an experimental tabular Q-learning
+   agent but never wrote it up. v2 formalizes it as the baseline, then
+   replaces it with a Deep Q-Network once the tabular approach is shown
+   to break down on the full 24-edge risk state:
+   Q-learning: state = (node, Hormuz risk bucket) → 19×5 = 95 table entries
+   DQN:        state = one-hot node (19) + LSTM risk vector (24) = 43 dims
+               Hidden: 256 → 128 → n_actions (19), ReLU + LayerNorm
+               Training extras: experience replay (10k buffer), target network,
+               Huber loss, gradient clipping, ε-decay schedule
 
 3. End-to-end pipeline:
    [signal window] → LSTM → r̂(e,t) → update graph → DQN routes → display
@@ -25,7 +29,7 @@ What's new vs v1:
 import copy
 import heapq
 import random
-from collections import deque
+from collections import defaultdict, deque
 
 import networkx as nx
 import numpy as np
@@ -337,6 +341,118 @@ def train_lstm(model: LSTMRiskPredictor, data: np.ndarray,
 # ──────────────────────────────────────────────────────────────────────────────
 # DEEP Q-NETWORK
 # ──────────────────────────────────────────────────────────────────────────────
+class QLearningAgent:
+    """
+    v1 shipped an experimental version of this agent but never wrote up how it
+    worked. Formalized here for the first time as v2's baseline. Tabular Q-learning:
+    a lookup table Q(s,a), updated via the Bellman equation, no neural network.
+
+    State is deliberately compact — (node, Hormuz risk bucket) — 19 nodes ×
+    5 buckets = 95 states, fully explorable in a few hundred episodes. This
+    is the ceiling of what a table can cover. Encoding the full 24-edge risk
+    vector instead would need 19 × 5²⁴ ≈ 60 trillion entries — intractable
+    for a table, which is exactly why the DQN below replaces it.
+    """
+    def __init__(self, alpha: float = 0.15, gamma: float = 0.9, epsilon: float = 0.5):
+        self.alpha   = alpha
+        self.gamma   = gamma
+        self.epsilon = epsilon
+        self.Q: dict = defaultdict(float)
+
+    def _state(self, G: nx.DiGraph, node: str) -> tuple:
+        hormuz_risks = [G[u][v]["risk"] for u, v in G.edges()
+                        if G[u][v].get("hormuz_dependent")]
+        avg = float(np.mean(hormuz_risks)) if hormuz_risks else 0.0
+        return (node, round(avg * 4) / 4)
+
+    def _act(self, G: nx.DiGraph, node: str,
+             exclude: set | None = None, target: str | None = None) -> str | None:
+        neighbors = [
+            n for n in G.neighbors(node)
+            if n not in (exclude or set())
+            and (G.nodes[n].get("type") != "consumer" or n == target)
+        ]
+        if not neighbors:
+            return None
+        if random.random() < self.epsilon:
+            return random.choice(neighbors)
+        state  = self._state(G, node)
+        q_vals = [self.Q[(state, a)] for a in neighbors]
+        max_q  = max(q_vals)
+        best   = [n for n, q in zip(neighbors, q_vals) if q == max_q]
+        return random.choice(best)
+
+    def _update(self, G: nx.DiGraph, s: str, action: str, reward: float, ns: str) -> None:
+        state      = self._state(G, s)
+        next_state = self._state(G, ns)
+        next_nbrs  = list(G.neighbors(ns))
+        best_next  = max((self.Q[(next_state, a)] for a in next_nbrs), default=0.0)
+        self.Q[(state, action)] += self.alpha * (
+            reward + self.gamma * best_next - self.Q[(state, action)]
+        )
+
+    def _episode(self, G: nx.DiGraph, source: str, target: str,
+                 max_steps: int = 30) -> tuple[list, float]:
+        node        = source
+        path        = [node]
+        total       = 0.0
+        seen        = {node}
+        prev_node   = None
+        prev_action = None
+        for _ in range(max_steps):
+            if node == target:
+                break
+            action = self._act(G, node, exclude=seen, target=target)
+            if action is None or not G.has_edge(node, action):
+                if prev_node is not None and prev_action is not None:
+                    self._update(G, prev_node, prev_action, -100.0, node)
+                break
+            e      = G[node][action]
+            reward = -(e["cost"] + 40 * e["risk"] + 2 * e["time"])
+            if action == target:
+                reward += 100.0
+            self._update(G, node, action, reward, action)
+            seen.add(action)
+            path.append(action)
+            total += reward
+            prev_node   = node
+            prev_action = action
+            node = action
+        return path, total
+
+    def train(self, G: nx.DiGraph, source: str, target: str,
+              episodes: int = 300) -> list[float]:
+        rewards = []
+        edges = list(G.edges())
+        for ep in range(episodes):
+            self.epsilon = max(0.05, self.epsilon * 0.994)
+            saved = {(u, v): G[u][v]["risk"] for u, v in edges}
+            phase = (ep % 4)
+            for u, v in edges:
+                base = G[u][v]["base_risk"]
+                hdep = G[u][v].get("hormuz_dependent", False)
+                if phase == 0:
+                    G[u][v]["risk"] = float(np.clip(base + np.random.normal(0, 0.04), 0, 1))
+                elif phase == 1:
+                    bump = 0.22 if hdep else 0.05
+                    G[u][v]["risk"] = float(np.clip(base + bump + np.random.normal(0, 0.04), 0, 1))
+                elif phase == 2:
+                    G[u][v]["risk"] = float(np.clip((0.76 if hdep else base) + np.random.normal(0, 0.04), 0, 1))
+                else:
+                    G[u][v]["risk"] = float(np.clip((0.93 if hdep else base) + np.random.normal(0, 0.03), 0, 1))
+            _, r = self._episode(G, source, target)
+            for u, v in edges:
+                G[u][v]["risk"] = saved[(u, v)]
+            rewards.append(r)
+        return rewards
+
+    def greedy_path(self, G: nx.DiGraph, source: str, target: str) -> list:
+        old, self.epsilon = self.epsilon, 0.0
+        path, _ = self._episode(G, source, target)
+        self.epsilon = old
+        return path
+
+
 class DQNNet(nn.Module):
     """
     State  : one-hot node (N_NODES) + edge risks (N_EDGES)  → 43 dims
@@ -935,6 +1051,9 @@ if "G" not in st.session_state:
     st.session_state.lstm_results = None
     st.session_state.synth_data   = None
     st.session_state.risk_window  = None   # (SEQ_LEN, n_edges, n_features)
+    # Q-learning (baseline)
+    st.session_state.q_agent      = None
+    st.session_state.q_rewards    = []
     # DQN
     st.session_state.dqn_agent    = None
     st.session_state.crisis       = False
@@ -1085,7 +1204,7 @@ with tab2:
     Input  : (batch, seq_len=10, n_edges=24, n_features=4)
              features = [risk, oil_volatility, insurance_premium, sentiment]
     LSTM   : 128 hidden units, 2 layers, dropout 0.2
-    Head   : Linear(128→64) → ReLU → Linear(64→21) → Sigmoid
+    Head   : Linear(128→64) → ReLU → Linear(64→24) → Sigmoid
     Output : predicted r(e, t+1) for all edges — in (0, 1)
     Loss   : MSE on held-out 20% of synthetic data
     ```
@@ -1183,14 +1302,108 @@ with tab2:
 
 # ── TAB 3 · DQN AGENT ────────────────────────────────────────────────────────
 with tab3:
-    st.markdown("## 🤖 Deep Q-Network Agent")
+    st.markdown("## 🤖 From Q-Learning to Deep Q-Network")
+    st.markdown(r"""
+    v1 shipped a routing agent but never wrote it up. This tab explains it properly,
+    trains it, watches it break — and then fixes it.
+    """)
+
+    # ── Step 1: Q-learning, the baseline ────────────────────────────────────────
+    st.markdown("### Step 1 — Q-Learning (the baseline)")
+    st.markdown(r"""
+    **Analogy:** imagine learning to drive in a city you've never seen. At first you turn
+    randomly. Over time you learn which turns lead to fast routes and which lead to dead
+    ends. You don't memorise a single path — you build an *intuition* (a policy) for every
+    intersection you might face. That's Q-learning.
+
+    **The MDP setup:**
+
+    | Component | Definition |
+    |-----------|-----------|
+    | **State** $s$ | Where the agent is + current Hormuz risk level |
+    | **Action** $a$ | Which node to move to next |
+    | **Reward** $R$ | $-(cost + 40 \cdot risk + 2 \cdot time)$, +100 if target reached |
+    | **Goal** | Maximise total reward across the journey |
+
+    **The Q-function:** $Q(s, a)$ = "how good is it to take action $a$ from state $s$?"
+    After taking action $a$, moving to state $s'$, and getting reward $r$, the table entry updates:
+
+    $$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
+
+    | Symbol | Meaning |
+    |--------|---------|
+    | $\alpha$ | Learning rate — how much to shift toward new information (0.15) |
+    | $\gamma$ | Discount factor — how much to value future vs immediate rewards (0.9) |
+    | $r + \gamma \max Q(s',a')$ | Bellman target — what Q *should* be |
+    | The bracket | TD error — the surprise, used to nudge Q toward the target |
+
+    **Exploration vs exploitation (ε-greedy):**
+    ```
+    With probability ε  → take a RANDOM action (explore)
+    With probability 1-ε → take the BEST KNOWN action (exploit)
+    ```
+    ε starts at 0.5 and decays to 0.05 as training progresses.
+
+    **The state, kept deliberately small:** `(node, Hormuz_risk_bucket)` — 19 nodes × 5 buckets
+    = 95 states, fully explorable in a few hundred episodes. What the agent learns is not a
+    single path but a *policy table* mapping (node, risk_level) → best_next_node.
+    """)
+
+    qcol1, qcol2 = st.columns([1, 2])
+    with qcol1:
+        n_q_eps = st.slider("Q-learning training episodes", 100, 1000, 300, 50)
+        if st.button("🎯 Train Q-Learning", use_container_width=True):
+            with st.spinner(f"Training tabular Q-learning agent for {n_q_eps} episodes…"):
+                q_agent = QLearningAgent(alpha=0.15, gamma=0.9, epsilon=0.5)
+                q_rewards = q_agent.train(G, source, target, episodes=n_q_eps)
+                st.session_state.q_agent   = q_agent
+                st.session_state.q_rewards = q_rewards
+            st.success(f"Trained! Table covers {len(q_agent.Q):,} (state, action) entries "
+                       f"out of a possible 95 states.")
+    with qcol2:
+        if st.session_state.q_rewards:
+            q_rews = st.session_state.q_rewards
+            q_win  = max(10, len(q_rews) // 20)
+            q_sm   = pd.Series(q_rews).rolling(q_win, min_periods=1).mean()
+            fig_q = go.Figure()
+            fig_q.add_trace(go.Scatter(y=q_rews, name="Episode Reward",
+                                        line=dict(color="#3498DB", width=1), opacity=0.3))
+            fig_q.add_trace(go.Scatter(y=q_sm, name=f"Smoothed (w={q_win})",
+                                        line=dict(color="#F39C12", width=2)))
+            fig_q.update_layout(**_DARK, title="Q-Learning Episode Rewards",
+                                xaxis_title="Episode", yaxis_title="Total Reward", height=280)
+            st.plotly_chart(fig_q, use_container_width=True)
+        else:
+            st.info("Train the Q-learning agent to see the learning curve.")
+
+    st.markdown("---")
+    st.markdown("### Why the Q-table breaks")
+    st.markdown(f"""
+    v2's graph carries a live risk value on all **{N_EDGES} edges**, not just Hormuz's. A state
+    that encodes all of them, even discretised to 5 levels per edge, is `19 × 5^{N_EDGES}` ≈
+    60 trillion entries. The agent above intentionally never sees that — it compresses risk
+    down to one Hormuz-average bucket, which is why it fits in a table at all. Try to encode
+    the full risk vector tabularly and the table can't be trained: at 600 episodes you'd visit
+    on the order of 18,000 states — a coverage of about 0.00003%. Every untouched state returns
+    Q = 0, so the greedy policy ties out to the same arbitrary neighbour every time. Not random —
+    *deterministic*, but meaningless. In a crisis, when the risk combination is often one the
+    agent has never seen, this is exactly when it matters most.
+
+    That's the scaling wall a lookup table hits. The fix isn't a bigger table. It's replacing
+    the table with a function that can interpolate between states it has seen.
+    """)
+
+    st.markdown("---")
+
+    # ── Step 2: DQN, the fix ─────────────────────────────────────────────────────
+    st.markdown("### Step 2 — Deep Q-Network (the fix)")
     st.markdown(r"""
     Replaces the tabular Q-table with a **neural network** that generalises to
     unseen (node, risk-vector) combinations.
 
     ```
-    State (41-dim):  one-hot node (19)  +  LSTM edge risks (22)
-    Network       :  Linear(41→256) → LayerNorm → ReLU → Dropout
+    State (43-dim):  one-hot node (19)  +  LSTM edge risks (24)
+    Network       :  Linear(43→256) → LayerNorm → ReLU → Dropout
                      → Linear(256→128) → ReLU → Linear(128→19)
     Action        :  choose next node (masked to valid neighbours)
     Loss          :  Huber (SmoothL1) on Bellman targets
@@ -1203,6 +1416,9 @@ with tab3:
     R(edge) = -(cost + 12·risk + 2·time)
     R(target reached) += +100
     ```
+
+    A state the network has never seen isn't a cold miss — it passes through the network and
+    produces Q-value estimates by interpolating from similar states it *has* trained on.
     """)
 
     col1, col2 = st.columns([1, 2])
@@ -1257,36 +1473,51 @@ with tab3:
                                 xaxis_title="Gradient Step", yaxis_title="Loss", height=260)
             st.plotly_chart(fig_l, use_container_width=True)
 
-        st.markdown("### DQN vs Dijkstra Path Comparison")
+        st.markdown("### DQN vs Q-Learning vs Dijkstra Path Comparison")
         dqn_path  = agent.greedy_path(source, target)
         _, d_path = risk_dijkstra(G, source, target, alpha, lam)
+        q_agent   = st.session_state.q_agent
+        q_path    = q_agent.greedy_path(G, source, target) if q_agent else None
 
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
+        cols = st.columns(3 if q_agent else 2)
+        with cols[0]:
             st.markdown("#### 🤖 DQN (learned policy)")
             st.code(" → ".join(dqn_path) if dqn_path else "No path")
             ds = path_stats(G, dqn_path)
             for k, v in ds.items():
                 st.metric(k, "⚠️YES" if v is True else ("✅NO" if v is False else str(v)))
-        with col_d2:
+        with cols[1]:
             st.markdown("#### 🗺️ Dijkstra (single-shot)")
             st.code(" → ".join(d_path) if d_path else "No path")
             ds2 = path_stats(G, d_path)
             for k, v in ds2.items():
                 st.metric(k, "⚠️YES" if v is True else ("✅NO" if v is False else str(v)))
+        if q_agent:
+            with cols[2]:
+                st.markdown("#### 📋 Q-Learning (table lookup)")
+                st.code(" → ".join(q_path) if q_path else "No path")
+                ds3 = path_stats(G, q_path)
+                for k, v in ds3.items():
+                    st.metric(k, "⚠️YES" if v is True else ("✅NO" if v is False else str(v)))
 
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
+        map_cols = st.columns(3 if q_agent else 2)
+        with map_cols[0]:
             st.plotly_chart(draw_network(G, path=dqn_path, title="DQN Route"),
                             use_container_width=True)
-        with col_m2:
+        with map_cols[1]:
             st.plotly_chart(draw_network(G, path=d_path, title="Dijkstra Route"),
                             use_container_width=True)
+        if q_agent:
+            with map_cols[2]:
+                st.plotly_chart(draw_network(G, path=q_path, title="Q-Learning Route"),
+                                use_container_width=True)
 
         st.info("""
         **Key difference:** Dijkstra recomputes the globally optimal path from scratch each time.
         The DQN's policy network *generalises* — given a new (node, risk_vector) state it has never
-        seen, it estimates Q-values via a forward pass rather than a full graph traversal.
+        seen, it estimates Q-values via a forward pass rather than a full graph traversal. The
+        Q-learning agent, by contrast, is a lookup — instant on the 95 states it was trained on,
+        but blind (Q=0, arbitrary tie-break) on anything outside that compact state space.
         That's what makes it viable for real-time rerouting under continuously changing risk.
         """)
 
@@ -1392,7 +1623,7 @@ with tab5:
                 {"Layer": "Last hidden", "Shape": "(B, 128)", "Params": "—"},
                 {"Layer": "Linear 128→64", "Shape": "(B, 64)", "Params": "8,256"},
                 {"Layer": "ReLU + Dropout", "Shape": "(B, 64)", "Params": "—"},
-                {"Layer": "Linear 64→21", "Shape": f"(B, {N_EDGES})", "Params": f"{64*N_EDGES + N_EDGES}"},
+                {"Layer": "Linear 64→24", "Shape": f"(B, {N_EDGES})", "Params": f"{64*N_EDGES + N_EDGES}"},
                 {"Layer": "Sigmoid", "Shape": f"(B, {N_EDGES})", "Params": "—"},
             ]
             st.dataframe(pd.DataFrame(arch_lstm), use_container_width=True, hide_index=True)
@@ -1419,7 +1650,7 @@ with tab5:
         if agent:
             arch_dqn = [
                 {"Layer": "Input", "Shape": f"({agent.state_dim},) = {N_NODES} node + {N_EDGES} risks", "Params": "—"},
-                {"Layer": "Linear 41→256", "Shape": "(256,)", "Params": f"{agent.state_dim*256 + 256:,}"},
+                {"Layer": f"Linear {agent.state_dim}→256", "Shape": "(256,)", "Params": f"{agent.state_dim*256 + 256:,}"},
                 {"Layer": "LayerNorm(256)", "Shape": "(256,)", "Params": "512"},
                 {"Layer": "ReLU + Dropout", "Shape": "(256,)", "Params": "—"},
                 {"Layer": "Linear 256→128", "Shape": "(128,)", "Params": f"{256*128 + 128:,}"},
@@ -1461,26 +1692,33 @@ with tab5:
         {"Component":       "Risk prediction",
          "v1":              "OU process (stochastic simulation, 0 params)",
          "v2":              f"LSTM (trained, {st.session_state.lstm_model.n_params():,} params)" if st.session_state.lstm_model else "LSTM (not yet trained)"},
-        {"Component":       "Decision model",
-         "v1":              "Tabular Q-table (dict, grows with state visits)",
-         "v2":              f"DQN (fixed {st.session_state.dqn_agent.policy.n_params():,}-param network)" if st.session_state.dqn_agent else "DQN (not yet trained)"},
-        {"Component":       "State space",
-         "v1":              "Discrete: (node, discretised risk bucket)",
-         "v2":              "Continuous: 41-dim float vector"},
-        {"Component":       "Generalisation",
-         "v1":              "None — unseen states get Q=0",
-         "v2":              "Yes — neural network interpolates"},
-        {"Component":       "Experience replay",
-         "v1":              "None",
-         "v2":              "10,000-transition circular buffer"},
-        {"Component":       "Target network",
-         "v1":              "None",
-         "v2":              "Separate frozen copy, synced every 100 steps"},
         {"Component":       "Routing",
          "v1":              "Risk-aware Dijkstra (unchanged)",
          "v2":              "Risk-aware Dijkstra (unchanged)"},
     ])
     st.dataframe(cmp, use_container_width=True, hide_index=True)
+
+    st.markdown("### Routing Agent: Q-Learning (baseline) → DQN (the fix)")
+    st.caption("Both live only in v2 — v1 never had a written-up RL agent. This is the "
+               "progression explained in the DQN Agent tab above.")
+    cmp_rl = pd.DataFrame([
+        {"Component":       "Decision model",
+         "Q-Learning":      "Tabular Q-table (dict, grows with state visits)",
+         "DQN":             f"DQN (fixed {st.session_state.dqn_agent.policy.n_params():,}-param network)" if st.session_state.dqn_agent else "DQN (not yet trained)"},
+        {"Component":       "State space",
+         "Q-Learning":      "Discrete: (node, discretised Hormuz risk bucket) — 95 states",
+         "DQN":             f"Continuous: {st.session_state.dqn_agent.state_dim if st.session_state.dqn_agent else N_NODES + N_EDGES}-dim float vector"},
+        {"Component":       "Generalisation",
+         "Q-Learning":      "None — unseen states get Q=0",
+         "DQN":             "Yes — neural network interpolates"},
+        {"Component":       "Experience replay",
+         "Q-Learning":      "None",
+         "DQN":             "10,000-transition circular buffer"},
+        {"Component":       "Target network",
+         "Q-Learning":      "None",
+         "DQN":             "Separate frozen copy, synced every 100 steps"},
+    ])
+    st.dataframe(cmp_rl, use_container_width=True, hide_index=True)
 
 
 # ── TAB 6 · ECONOMIC CASCADE ─────────────────────────────────────────────────

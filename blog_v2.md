@@ -66,7 +66,7 @@ We built the global oil supply chain as a directed graph: 19 nodes (Gulf produce
 
 The answer was a modified Dijkstra algorithm — the same shortest-path logic used by every GPS, but with edge weights redefined as `cost + α·time + λ·risk`. As the risk aversion parameter λ rises, dangerous routes become "expensive" in the algorithm's view, until at a precise threshold λ* the algorithm abandons Hormuz entirely and reroutes via Yanbu and the Cape of Good Hope. That threshold — the exact point where the bypass becomes cheaper in risk-adjusted terms — is the price of resilience.
 
-We added a Monte Carlo stress-tester (500 random crisis scenarios), a Q-learning routing agent, and an economic cascade model tracing a Hormuz disruption through oil prices, freight premiums, consumer inflation, food prices, and GDP across five global regions.
+We added a Monte Carlo stress-tester (500 random crisis scenarios) and an economic cascade model tracing a Hormuz disruption through oil prices, freight premiums, consumer inflation, food prices, and GDP across five global regions. v1's app also quietly shipped an experimental Q-learning routing agent — we never wrote about how it worked. That gap gets closed below, right before we replace it.
 
 V1 answered the question: *given a crisis, what do you do?*
 
@@ -92,11 +92,11 @@ For a VLCC carrying $100 million of crude oil, seven steps is the difference bet
 
 ## What V2 Looks Like in Practice
 
-Like v1, the whole thing runs in a Streamlit browser app. The additions are in two tabs.
+Like v1, the whole thing runs in a Streamlit browser app. The additions are in three tabs.
 
 **The Training tab** is where the LSTM learns. You generate a synthetic dataset — 2,000 timesteps of risk, oil volatility, insurance premiums, and sentiment across all 24 edges — then train the network over 120 epochs. Watch the loss curves converge. When training is done, a per-edge RMSE table shows you which edges the model predicts most accurately (Cape of Good Hope: very well, since it barely moves) and which are hardest (Hormuz, because the crisis events are sharp and large).
 
-**The DQN Agent tab** is where the routing agent learns. Train for 600 episodes and watch the reward curve climb — from large-negative values when the agent wanders randomly, to a stable plateau when it has learned to reach the target reliably via low-risk paths. Then run the greedy policy and compare it against Dijkstra on the current graph. Under normal conditions, they match. Under crisis conditions, the DQN reroutes earlier.
+**The DQN Agent tab** is where both routing agents live, in sequence. First, train the Q-learning baseline and watch it fit its 95-state table in a few hundred episodes. Then train the DQN for 600 episodes and watch the reward curve climb — from large-negative values when the agent wanders randomly, to a stable plateau when it has learned to reach the target reliably via low-risk paths. Run the greedy policy for both and compare them against Dijkstra on the current graph, side by side. Under normal conditions, all three tend to agree. Under crisis conditions, the DQN reroutes earlier — and the Q-learning agent's table-lookup limits become visible.
 
 **The Model Internals tab** shows you inside the system while it runs: the LSTM's per-edge risk forecast alongside the current graph risk (the gap between them is the actionable signal), the DQN's Q-value heatmap (which nodes does the agent currently prefer from each position?), and the exploration rate ε decaying toward zero as training progresses.
 
@@ -194,29 +194,59 @@ The real test is not the loss. It is whether the lag structure was actually lear
 
 ## Step 3: Teaching the Agent to Generalise
 
-Routing is a decision problem. At each node, the agent must choose which neighbouring node to move to next, balancing cost, time, and risk, with the goal of reaching the destination. v1 solved this with a Q-learning agent. v2 replaces that agent with a Deep Q-Network. The reason is a single word: scale.
+Routing is a decision problem. At each node, the agent must choose which neighbouring node to move to next, balancing cost, time, and risk, with the goal of reaching the destination. v1's app quietly shipped an experimental agent for this — tabular Q-learning — but we never actually wrote about how it worked. That omission gets fixed here, first, before we explain why v2 replaces it with a Deep Q-Network. The reason for the replacement is a single word: scale.
+
+### How Q-Learning Actually Works
+
+Think of it the way you'd learn to drive in a city you've never seen. At first you turn randomly. Over time you learn which turns lead to fast routes and which lead to dead ends. You don't memorise a single path — you build an *intuition* (a policy) for every intersection you might face. That is Q-learning.
+
+Formally, it is a Markov Decision Process:
+
+| Component | Definition |
+|-----------|-----------|
+| **State** $s$ | Where the agent is + the current Hormuz risk level |
+| **Action** $a$ | Which node to move to next |
+| **Reward** $R$ | $-(cost + 40 \cdot risk + 2 \cdot time)$, +100 if the target is reached |
+| **Goal** | Maximise total reward across the journey |
+
+The agent learns a **Q-function**: $Q(s, a)$, a value estimate answering "how good is it to take action $a$ from state $s$?" After taking action $a$, landing in state $s'$, and collecting reward $r$, the table entry updates by the Bellman equation:
+
+$$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
+
+| Symbol | Meaning |
+|--------|---------|
+| $\alpha$ | Learning rate — how much to shift toward new information (0.15) |
+| $\gamma$ | Discount factor — how much to value future vs. immediate rewards (0.9) |
+| $r + \gamma \max Q(s',a')$ | Bellman target — what Q *should* be |
+| The bracket term | TD error — the surprise, used to nudge Q toward the target |
+
+Training balances exploration against exploitation with an ε-greedy policy: with probability ε the agent takes a random action (explore), otherwise it takes the best action it currently knows (exploit). ε starts at 0.5 and decays to 0.05 as training progresses, so the agent wanders early and commits later.
+
+What the agent ends up with is not a single path. It is a *policy table* — a lookup mapping (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search. That is the appeal: instant decisions, no recomputation.
+
+It is also the limitation. The table only knows what it visited during training.
 
 ### Why the Q-table Broke
 
-The Q-learning agent in v1 built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest.
+The Q-learning agent built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest.
 
-This works when the state space is small. In v1, the state was `(current_node, Hormuz_risk_bucket)` — 19 nodes × 5 buckets = 95 states. The agent could cover all of them in a few hundred episodes.
+This works when the state space is small. The agent above keeps state deliberately compact: `(current_node, Hormuz_risk_bucket)` — 19 nodes × 5 buckets = 95 states. The agent could cover all of them in a few hundred episodes, which is exactly why it stayed tabular rather than falling over.
 
-In v2, the state is `(current_node, risk_on_all_24_edges)`. Even discretised to 5 levels per edge, that is 19 × 5²⁴ ≈ 60 trillion entries.
+The compactness is the tell. A table can only stay small if you throw away information — here, all risk data except the Hormuz average. v2's graph carries a live, independently evolving risk value on all 24 edges, not just Hormuz's. A state that actually captures that is `(current_node, risk_on_all_24_edges)`. Even discretised to 5 levels per edge, that is 19 × 5²⁴ ≈ 60 trillion entries.
 
 Here is what 60 trillion looks like in training terms:
 
 | Agent | State Space | States Visited (600 episodes) | Coverage |
 |-------|-------------|-------------------------------|---------|
-| v1 Tabular | 95 | ~95 | ~100% |
-| v2 Tabular (hypothetical) | 60 trillion | ~18,000 | 0.00003% |
-| v2 DQN | Continuous ℝ⁴³ | — | Interpolates |
+| Q-Learning (as trained, compact state) | 95 | ~95 | ~100% |
+| Q-Learning (hypothetical, full 24-edge state) | 60 trillion | ~18,000 | 0.00003% |
+| DQN | Continuous ℝ⁴³ | — | Interpolates |
 
-*[Visual suggestion: An infographic showing three representations side by side. Left: a small 10×10 grid, mostly filled with colour — v1's state space, nearly fully explored. Centre: a vast grid extending beyond the frame, with a tiny cluster of coloured cells in one corner — v2's tabular state space, vanishingly sparse. Right: a smooth gradient surface representing the DQN's continuous approximation — no empty cells, because coverage is by interpolation, not enumeration.]*
+*[Visual suggestion: An infographic showing three representations side by side. Left: a small 10×10 grid, mostly filled with colour — Q-learning's compact state space, nearly fully explored. Centre: a vast grid extending beyond the frame, with a tiny cluster of coloured cells in one corner — what the tabular approach would face on the full 24-edge state, vanishingly sparse. Right: a smooth gradient surface representing the DQN's continuous approximation — no empty cells, because coverage is by interpolation, not enumeration.]*
 
 For every unvisited state, the Q-table returns Q = 0. When all actions have Q = 0, argmax picks the first neighbour in dictionary order. Not random — *deterministic*, but meaningless. The agent doesn't know it's lost. It just happens to always pick the same direction. In a crisis, when the routing decision matters most, this is exactly when novel risk combinations appear.
 
-At test time, the tabular agent produced random-equivalent paths for roughly 40% of novel risk configurations.
+At test time, a tabular agent run against the full 24-edge state produced random-equivalent paths for roughly 40% of novel risk configurations.
 
 ### How the DQN Fixes It
 
@@ -299,11 +329,9 @@ The market — represented here by the insurance premium — doesn't finish catc
 
 ## Step 5: What the Disruption Actually Costs
 
-Both versions include an economic cascade model. V1 introduced it. V2 refined the calibration and added Monte Carlo tail-risk quantification. It is worth describing in full, because routing cost alone is an abstraction — what matters is what happens to real economies when a shipping route closes.
+v1 introduced the economic cascade model as five broad stages, without day counts, calibrated against seven historical shocks. V2 doesn't re-derive that model — it does two things v1 didn't: pins the stages to an explicit day-by-day timeline, and, more substantively, runs 500 Monte Carlo scenarios through the cascade's *economic* outputs (oil, CPI, food, GDP), not just through routing cost the way v1's Monte Carlo did.
 
-A Hormuz disruption does not arrive as a line item on a logistics invoice. It propagates through the global economy in waves, each with a measurable lag.
-
-**Days 1–7.** Oil prices spike. The size of the spike depends almost entirely on how long the market expects the disruption to last.
+The timeline: oil spikes within days 1–7, with the size of the spike a function of expected duration —
 
 | Duration | Price Multiplier | Historical Calibration |
 |----------|-----------------|----------------------|
@@ -312,11 +340,9 @@ A Hormuz disruption does not arrive as a line item on a logistics invoice. It pr
 | ≤ 90 days | 8.0× | 1990 Gulf War: oil +60% |
 | > 90 days | 12.0× | 1973 Arab Embargo: oil +400% |
 
-Strategic reserves provide some buffer — OPEC's spare capacity can offset up to ~35% of the disrupted supply, and the IEA's Strategic Petroleum Reserve covers roughly 17 days of full Hormuz flow. But above crisis severity 0.5, a panic premium kicks in: behavioural overshoot from inventory hoarding and risk-off futures positioning. The market always over-reaches.
+— buffered partly by OPEC spare capacity (~35% offset) and the IEA's Strategic Petroleum Reserve (~17 days of full Hormuz flow), though a panic premium kicks in above severity 0.5 as inventory hoarding overshoots. Freight rates reprice in days 8–30 (Cape rerouting adds 14 days and ~$630k in bunker costs per voyage; in the 2019 Abqaiq episode the TD3C spot rate moved WS 60→300 in days). Consumer prices follow with a ~30-day lag, and food prices with a ~45-day lag through energy, fertiliser, and freight costs compounding together. Central banks respond in months 2–6, tightening into a supply shock they can't otherwise fix — each 1% of unexpected CPI implies roughly 50bps of tightening and 0.15% of GDP contraction through the credit channel, arriving after the direct shock and outlasting it.
 
-**Days 8–30.** Freight rates reprice. Tankers diverting around the Cape of Good Hope add 14 transit days and roughly $630,000 in extra bunker costs per voyage. In the 2019 Abqaiq episode, the TD3C spot rate moved from WS 60 to WS 300 — a 400% move — in days. War-risk insurance premiums follow the same logic, just more slowly.
-
-**Days 30–60.** Consumer prices begin reflecting the oil shock — lagged by approximately 30 days through the supply chain pipeline (wholesale to retail to shelf to statistics). This is where the geographic inequality becomes stark.
+The regional breakdown is refined from v1's version, now sourced to an IMF working paper and expressed as pass-through coefficients rather than ranges:
 
 | Region | Oil Import Dependency | CPI Pass-Through | GDP Impact per 10% Oil Rise |
 |--------|----------------------|-----------------|----------------------------|
@@ -328,23 +354,15 @@ Strategic reserves provide some buffer — OPEC's spare capacity can offset up t
 
 *Source: IMF Working Paper 17/53 (Gelos & Ustyugova 2017)*
 
-The United States, producing ~13 MBD domestically, barely registers. East Asia, 85% import-dependent with limited strategic reserves, absorbs four times the GDP shock from the identical oil price move. One disruption. Five entirely different economic experiences.
+East Asia absorbs roughly four times the GDP shock the USA does from an identical oil price move — same physical event, five different economic experiences.
 
-**Days 45–90.** Food prices rise, through three compounding channels: direct energy costs in agriculture, fertiliser costs (nitrogen fertiliser is natural gas-based; oil-gas correlation runs ~0.60 in energy crisis periods), and freight surcharges on food imports. The 2022 Russia sanctions showed this clearly — oil up 60%, FAO global food price index up 34%.
+**What's actually new: Monte Carlo on the cascade itself.** We ran 500 scenarios across the full range of severities and durations and looked at the distribution of *economic* outcomes, not routing cost. The 95th-percentile tail: oil +90–120%, global CPI +9–12%, global food prices +45–65%, GDP −2.5% to −4.0%. These aren't worst-case hypotheticals — they're the top five percent of a realistic disruption distribution, and unlike v1's routing-focused Monte Carlo, they're the number a planner would actually need to size a reserve or a hedge against.
 
-**Months 2–6.** Central banks respond. Supply-side inflation cannot be fixed by raising interest rates — but that is the only tool available. Each 1% of unexpected headline CPI implies approximately 50 basis points of tightening, which implies approximately 0.15% of GDP contraction through the credit channel. This second-order drag arrives after the direct energy shock, amplifies it, and persists well after oil prices have begun to normalise.
+*[Visual suggestion: Three-panel Monte Carlo histogram — oil price change (%), global CPI impact, global food price change. Each panel: bars showing the frequency distribution across 500 scenarios, with a median marker, a 95th percentile marker, and a vertical orange line showing the current scenario.]*
 
-*[Visual suggestion: A 180-day multi-line time series chart with phase annotations. Four lines: oil price (spikes immediately, then decays through the six phases), freight premium (spikes in days 8–30), headline CPI (rises ~30 days after oil, plateaus), food price (rises ~45 days after oil). Six phase zones colour-coded and labelled across the x-axis (Shock, Peak, Reserve Deployment, Cape Rerouting, New Equilibrium, Recovery). A vertical dotted line marks end of disruption and the beginning of recovery. This chart makes the cascade temporal structure visual rather than listed.]*
+*[Visual suggestion: Grouped bar chart — five regions on x-axis, three bars per group (headline CPI, food price change, GDP impact) for a 90-day moderate-severity scenario, making the geographic asymmetry immediate.]*
 
-*[Visual suggestion: A Sankey diagram showing the transmission chain — "Hormuz Disruption" → "Oil Supply Shock" + "Freight Rate Spike" → "Energy Costs" + "Fertilizer Costs" → "Manufacturing Inputs" + "Food Import Costs" → "Headline CPI" → "Central Bank Hikes" + "GDP Contraction." Flow widths proportional to magnitude. The point is that the cascade is not linear — it branches, merges, and compounds. A list cannot show that. A Sankey can.]*
-
-We calibrated all of this against seven historical events — from the 1973 Arab Embargo to the 2023–24 Houthi attacks on Red Sea shipping — and then ran 500 Monte Carlo scenarios across the full range of severities and durations. The 95th percentile outcomes are sobering: oil +90–120%, global CPI +9–12%, global food prices +45–65%, GDP −2.5% to −4.0%. These are not worst-case extremes. They are the top five percent of a realistic disruption distribution.
-
-*[Visual suggestion: Three-panel Monte Carlo histogram — oil price change (%), global CPI impact, global food price change. Each panel: bars showing the frequency distribution across 500 scenarios, with a median marker, a 95th percentile marker, and a vertical orange line showing the current scenario. The tail extending well beyond most historical events makes the tail-risk argument visual rather than abstract.]*
-
-*[Visual suggestion: Grouped bar chart — five regions on x-axis, three bars per group (headline CPI, food price change, GDP impact) for a 90-day moderate-severity scenario. East Asia bars clearly tallest. USA bars barely visible at the same scale. This chart communicates the geographic asymmetry of the cascade more immediately than any table.]*
-
-**The conclusion:** the cost of a Hormuz closure is not the rerouting surcharge. It is oil price volatility compounding into freight premiums compounding into consumer inflation compounding into food price spikes compounding into central bank tightening — unequally, by geography, across six months. East Asia and India bear a burden four to five times heavier than the United States from the identical physical event. The routing model tells you what to do. The cascade model tells you what is at stake if you don't.
+**The conclusion, unchanged from v1 but now quantified at the tail:** the cost of a Hormuz closure isn't the rerouting surcharge — it's oil volatility compounding into freight, into consumer inflation, into food prices, into central bank tightening, unequally by geography. The routing model tells you what to do. The cascade model, now with a tail distribution attached, tells you what's at stake if you don't.
 
 ---
 
@@ -361,7 +379,7 @@ Here is what the full v2 system trains to:
 
 And here is the comparison that matters:
 
-| Scenario | V1 (Tabular Q-Learning) | V2 (LSTM + DQN) |
+| Scenario | Q-Learning (baseline) | LSTM + DQN (v2) |
 |----------|------------------------|-----------------|
 | Normal conditions | Correct — Hormuz route | Correct — Hormuz route |
 | Seen crisis severity | Correct bypass | Correct bypass |
