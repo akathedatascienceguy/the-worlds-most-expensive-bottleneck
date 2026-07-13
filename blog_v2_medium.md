@@ -207,7 +207,7 @@ Routing is a decision problem. At each node, the agent must choose which neighbo
 
 Think of it the way you'd learn to drive in a city you've never seen. At first you turn randomly. Over time you learn which turns lead to fast routes and which lead to dead ends. You don't memorise a single path — you build an *intuition* (a policy) for every intersection you might face. That is Q-learning.
 
-Formally, it is a Markov Decision Process:
+Put in driving terms before the formalism: the *state* is which corner you're standing on and how bad the traffic looks from there; the *action* is which street you turn onto; the *reward* is how that particular turn actually worked out — a fast, cheap, safe stretch feels good, a slow, expensive, risky one feels bad, and finally arriving is worth a large bonus on top; the *goal* is to end the whole trip having felt as good as possible along the way, not to win any single turn in isolation. Formally, that is a Markov Decision Process:
 
 ```
 Component     Definition
@@ -218,37 +218,53 @@ Reward (R)    −(cost + 40·risk + 2·time), +100 if target reached
 Goal          Maximise total reward across the journey
 ```
 
-The agent learns a **Q-function**: Q(s, a), a value estimate answering "how good is it to take action *a* from state *s*?" After taking action *a*, landing in state *s′*, and collecting reward *r*, the table entry updates by the Bellman equation:
+The agent learns a **Q-function**: Q(s, a) — in driving terms, your gut-feel rating for "turning this way, from this corner, given today's traffic." Every time you actually take a turn and see how it goes, you don't discard your old gut-feel and replace it wholesale. You nudge it, a little, toward what you just learned. After taking action *a*, landing in state *s′*, and collecting reward *r*, that nudge is the Bellman update:
 
 ```
 Q(s,a) ← Q(s,a) + α [ r + γ · max Q(s′,a′) − Q(s,a) ]
 ```
 
+Read the nudge as three ingredients, each with a driving-world meaning:
+
 ```
 Symbol                  Meaning
 ────────────────────────────────────────────────────────────────
-α (alpha)               Learning rate — how much to shift toward
-                          new information (0.15)
-γ (gamma)               Discount factor — how much to value future
-                          vs. immediate rewards (0.9)
-r + γ·max Q(s′,a′)      Bellman target — what Q *should* be
-The bracket term        TD error — the surprise, used to nudge Q
-                          toward the target
+α (alpha)               Learning rate — how much one trip is
+                          allowed to move your opinion. A stubborn
+                          driver (low α) barely updates after a
+                          single experience; a jumpy one (high α)
+                          overreacts to every fluke. Set to 0.15.
+γ (gamma)               Discount factor — how much weight you give
+                          the rest of the journey beyond just this
+                          turn. Low γ only cares about the next
+                          block; high γ is already thinking about
+                          the airport. Set to 0.9.
+r + γ·max Q(s′,a′)      Bellman target — what Q *should* be, given
+                          what you just experienced plus your best
+                          guess about everything still ahead.
+The bracket term        TD error — the surprise. The gap between
+                          what you expected this turn to be worth
+                          and what it turned out to be worth once
+                          you saw where it led. A big surprise means
+                          a big correction; no surprise means the
+                          hunch barely moves.
 ```
 
-Training balances exploration against exploitation with an ε-greedy policy: with probability ε the agent takes a random action (explore), otherwise it takes the best action it currently knows (exploit). ε starts at 0.5 and decays to 0.05 as training progresses, so the agent wanders early and commits later.
+Back to the learner-driver: at every intersection, you flip a weighted coin before deciding which way to turn. Heads, with probability ε, you take a random turn anyway — just to see where it leads. Tails, you take the turn you currently believe is fastest. On day one you don't trust your own judgment yet, so the coin is heavily weighted toward "explore anything" — ε starts at 0.5, meaning half your turns are deliberate detours into streets you haven't tried. As the trips pile up, you re-weight the coin toward "drive the route I already trust" — ε decays to 0.05, so by the end you're almost always taking the turn you believe in, only rarely still poking down an unfamiliar street just in case the city changed. That is ε-greedy: wander when you know little, commit once you know more.
 
-What the agent ends up with is not a single path. It is a *policy table* — a lookup mapping (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search. That is the appeal: instant decisions, no recomputation.
+What the agent ends up with, after enough trips, is not a memorised single best route from source to destination. It is closer to a driver's accumulated hunches at every intersection they've ever stood at — "from this corner, in this traffic, go left" — instantly recalled, never recalculated. Formally, that is a *policy table*: a lookup mapping (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search. That is the appeal: instant decisions, no recomputation.
 
 It is also the limitation. The table only knows what it visited during training.
 
 ### Why the Q-table Broke
 
-The Q-learning agent built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest.
+Stretch the driving analogy one step further. The learner-driver above never actually learned the whole city's traffic — they learned one road's traffic report (how bad is the Hormuz route right now?) and used it as a stand-in for conditions everywhere. That is why the notebook of hunches stayed thin: 19 intersections × 5 traffic levels = 95 pages, memorisable in an afternoon of driving.
 
-This works when the state space is small. The agent above keeps state deliberately compact: (current_node, Hormuz_risk_bucket) — 19 nodes × 5 buckets = 95 states. The agent could cover all of them in a few hundred episodes, which is exactly why it stayed tabular rather than falling over.
+Now imagine the city instead hands you a live, independently-updating traffic report for 24 different roads at once, and asks for a hunch covering every combination of conditions across all of them. That is not a notebook anymore — it is 19 × 5²⁴ ≈ 60 trillion pages. No driver fills that notebook in a lifetime of trips, let alone a few hundred training episodes.
 
-The compactness is the tell. A table can only stay small if you throw away information — here, all risk data except the Hormuz average. v2's graph carries a live, independently evolving risk value on all 24 edges, not just Hormuz's. A state that actually captures that is (current_node, risk_on_all_24_edges). Even discretised to 5 levels per edge, that is 19 × 5²⁴ ≈ 60 trillion entries.
+That is exactly the trap the Q-learning agent above was built to avoid, and exactly the wall it hits the moment you stop letting it avoid it. The agent built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest. This works when the state space is small, which is exactly why the agent above deliberately kept its state compact: (current_node, Hormuz_risk_bucket) — 95 states, coverable in a few hundred episodes.
+
+The compactness is the tell. A table can only stay small if you throw away information — here, all risk data except the Hormuz average. v2's graph carries a live, independently evolving risk value on all 24 edges, not just Hormuz's. A state that actually captures that is (current_node, risk_on_all_24_edges) — the 60-trillion-page notebook above.
 
 Here is what 60 trillion looks like in training terms:
 
@@ -263,7 +279,7 @@ DQN                                          Continuous ℝ⁴³  —           
 
 *Image: three state-space representations side by side — a fully-explored small grid, a vast sparse grid, and a smooth interpolated surface.*
 
-For every unvisited state, the Q-table returns Q = 0. When all actions have Q = 0, argmax picks the first neighbour in dictionary order. Not random — *deterministic*, but meaningless. The agent doesn't know it's lost. It just happens to always pick the same direction. In a crisis, when the routing decision matters most, this is exactly when novel risk combinations appear.
+For every unvisited state, the Q-table returns Q = 0. When all actions have Q = 0, argmax picks the first neighbour in dictionary order. Not random — *deterministic*, but meaningless. It is the driver arriving at an intersection with a blank page in the notebook, and turning left anyway, every single time, simply because "left" happens to be listed first — not because it's ever been right. The driver doesn't know they're lost. They just happen to always pick the same direction. In a crisis, when the routing decision matters most, this is exactly when novel risk combinations appear.
 
 At test time, a tabular agent run against the full 24-edge state produced random-equivalent paths for roughly 40% of novel risk configurations.
 

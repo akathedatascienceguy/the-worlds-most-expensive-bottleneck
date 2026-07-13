@@ -1,4 +1,4 @@
-# The World's Most Expensive Bottleneck: Second Edition
+# The World's Most Expensive Bottleneck: Second Edition
 
 *Written by Yash Vardhan Gupta and Nikita Gupta*
 
@@ -64,7 +64,7 @@ If you haven't read v1, a quick orientation.
 
 We built the global oil supply chain as a directed graph: 19 nodes (Gulf producers, maritime chokepoints, ocean waypoints, consuming regions) connected by 25 directed edges (shipping lanes and pipelines), each carrying real numbers for cost, transit time, throughput capacity, and a time-varying risk score. We then asked: what does optimal routing look like when "optimal" includes risk, not just cost?
 
-The answer was a modified Dijkstra algorithm — the same shortest-path logic used by every GPS, but with edge weights redefined as `cost + α·time + λ·risk`. As the risk aversion parameter λ rises, dangerous routes become "expensive" in the algorithm's view, until at a precise threshold λ* the algorithm abandons Hormuz entirely and reroutes via Yanbu and the Cape of Good Hope. That threshold — the exact point where the bypass becomes cheaper in risk-adjusted terms — is the price of resilience.
+The answer was a modified Dijkstra algorithm — the same shortest-path logic used by every GPS, but with edge weights redefined as cost + α·time + λ·risk. As the risk aversion parameter λ rises, dangerous routes become "expensive" in the algorithm's view, until at a precise threshold λ* the algorithm abandons Hormuz entirely and reroutes via Yanbu and the Cape of Good Hope. That threshold — the exact point where the bypass becomes cheaper in risk-adjusted terms — is the price of resilience.
 
 We added a Monte Carlo stress-tester (500 random crisis scenarios) and an economic cascade model tracing a Hormuz disruption through oil prices, freight premiums, consumer inflation, food prices, and GDP across five global regions. v1's app also quietly shipped an experimental Q-learning routing agent — we never wrote about how it worked. That gap gets closed below, right before we replace it.
 
@@ -120,14 +120,19 @@ Think of four news feeds running simultaneously in the background of a shipping 
 
 **Risk itself is latent — you can't observe it directly.** You back it out from these signals, the way a doctor estimates cardiovascular risk from blood pressure, cholesterol, and lifestyle data rather than from a number stamped on the patient. There is no public feed that says "Hormuz risk: 0.73."
 
-| Signal | Timing | What It Captures |
-|--------|--------|-----------------|
-| Sentiment | **Leads 3–5 steps** | Diplomatic escalation, news tone, shipping advisories |
-| Oil volatility | Concurrent | Futures market reaction to current risk level |
-| Insurance premium | **Lags 7–10 steps** | Lloyd's rolling reprice from incident history |
-| Risk (latent) | — | What the model is trained to predict |
+```
+Signal              Timing             What It Captures
+─────────────────────────────────────────────────────────────────────────
+Sentiment           Leads 3–5 steps    Diplomatic escalation, news tone,
+                                        shipping advisories
+Oil volatility      Concurrent         Futures market reaction to
+                                        current risk level
+Insurance premium   Lags 7–10 steps    Lloyd's rolling reprice from
+                                        incident history
+Risk (latent)       —                  What the model is trained to predict
+```
 
-*[Visual suggestion: A single time-series chart, clean and annotated, showing all four signals across roughly 40 timesteps around a simulated Hormuz crisis event. Sentiment line drops first and is labelled "early warning." Actual risk spikes at the event. Oil volatility spikes with it. Insurance premium rises slowly, catching up 7+ steps later. Two vertical dashed lines flank the anticipation window — this is the zone the LSTM is designed to exploit. This is the centrepiece visual of the piece.]*
+*Image: a time-series chart with sentiment dropping first ("early warning"), risk and oil volatility spiking together, insurance catching up 7+ steps later — the gap between them is the anticipation window the LSTM exploits.*
 
 Here is the insight this structure gives you: a model that uses sentiment as an input can, in principle, begin predicting rising risk before insurance markets have repriced. And a routing agent that acts on predicted risk, rather than current risk, begins rerouting before the market tells it to.
 
@@ -165,7 +170,7 @@ Input:  10 timesteps × 24 edges × 4 signals  →  sequence of 10 × 96-dimensi
    Linear(64 → 24)  →  Sigmoid    (one risk prediction per edge, bounded in [0,1])
 ```
 
-*[Visual suggestion: A clean architecture diagram. Left side: the rolling 10-step input window shown as a stack of 10 rows, each row containing four signal values per edge (colour-coded: sentiment in green, oil vol in yellow, insurance in orange, risk in red). Centre: two stacked LSTM boxes with gate annotations — small icons for forget/input/output gates, and a horizontal "memory highway" arrow passing through both layers. Right side: the linear head narrowing from 128 → 64 → 24, with a sigmoid curve annotated at the output. Underneath: "~251,000 parameters."]*
+*Image: architecture diagram — 10-step input window → two stacked LSTM boxes with gate icons → linear head narrowing 128 → 64 → 24. ~251,000 parameters.*
 
 Two design choices matter enough to name.
 
@@ -175,18 +180,20 @@ Two design choices matter enough to name.
 
 The model trains on 1,989 sequences constructed from a 2,000-step synthetic dataset:
 
-| Epoch | Train MSE | Val MSE | What's Happening |
-|-------|-----------|---------|-----------------|
-| 0 | 0.040 | 0.045 | Random initialisation |
-| 20 | 0.012 | 0.015 | Signal structure starting to emerge |
-| 80 | 0.005 | 0.007 | Learning rate reduced by scheduler |
-| 120 | 0.003 | 0.005 | Convergence — no overfitting |
+```
+Epoch   Train MSE   Val MSE   What's Happening
+──────────────────────────────────────────────────────────
+0       0.040       0.045     Random initialisation
+20      0.012       0.015     Signal structure starting to emerge
+80      0.005       0.007     Learning rate reduced by scheduler
+120     0.003       0.005     Convergence — no overfitting
+```
 
-*[Visual suggestion: A loss curve chart — two lines, training MSE in blue, validation MSE in orange, over 120 epochs. Both decline smoothly; two small step-down kinks appear around epochs 40–60 where the ReduceLROnPlateau scheduler fires. The lines stay close throughout — the narrow train-val gap confirms the model generalises rather than memorises.]*
+*Image: loss curve — training MSE (blue) and validation MSE (orange) over 120 epochs, declining smoothly and staying close together (no overfitting).*
 
 The real test is not the loss. It is whether the lag structure was actually learned. Diagnostic inspection of the model's predictions confirms: when sentiment drops in the input window, the LSTM begins predicting elevated Hormuz risk before the insurance premium in the same window has moved. It learned when to pay attention to which signal. That is the whole point.
 
-*[Visual suggestion: Three-panel overlay chart — one panel per representative edge (Hormuz → Indian Ocean Hub, Red Sea → Bab-el-Mandeb, Cape of Good Hope → Europe). Each panel shows actual risk as a solid line and LSTM prediction as a dashed line. On the Hormuz panel, the prediction rises 4–5 steps before the actual peak — the advance warning window highlighted in a shaded region. On the Cape panel, both lines are nearly flat. This makes the model's anticipation ability concrete and visual.]*
+*Image: three-panel overlay — actual risk (solid) vs. LSTM prediction (dashed) for Hormuz, Bab-el-Mandeb, and Cape of Good Hope. On Hormuz, the prediction rises 4–5 steps before the actual peak.*
 
 **The conclusion:** the LSTM turns four observable signals into a calibrated forecast of next-step risk across all 24 edges. It does not know what will happen. It knows what the signals have historically meant — and it acts on that.
 
@@ -200,51 +207,79 @@ Routing is a decision problem. At each node, the agent must choose which neighbo
 
 Think of it the way you'd learn to drive in a city you've never seen. At first you turn randomly. Over time you learn which turns lead to fast routes and which lead to dead ends. You don't memorise a single path — you build an *intuition* (a policy) for every intersection you might face. That is Q-learning.
 
-Formally, it is a Markov Decision Process:
+Put in driving terms before the formalism: the *state* is which corner you're standing on and how bad the traffic looks from there; the *action* is which street you turn onto; the *reward* is how that particular turn actually worked out — a fast, cheap, safe stretch feels good, a slow, expensive, risky one feels bad, and finally arriving is worth a large bonus on top; the *goal* is to end the whole trip having felt as good as possible along the way, not to win any single turn in isolation. Formally, that is a Markov Decision Process:
 
-| Component | Definition |
-|-----------|-----------|
-| **State** $s$ | Where the agent is + the current Hormuz risk level |
-| **Action** $a$ | Which node to move to next |
-| **Reward** $R$ | $-(cost + 40 \cdot risk + 2 \cdot time)$, +100 if the target is reached |
-| **Goal** | Maximise total reward across the journey |
+```
+Component     Definition
+──────────────────────────────────────────────────────────────
+State (s)     Where the agent is + the current Hormuz risk level
+Action (a)    Which node to move to next
+Reward (R)    −(cost + 40·risk + 2·time), +100 if target reached
+Goal          Maximise total reward across the journey
+```
 
-The agent learns a **Q-function**: $Q(s, a)$, a value estimate answering "how good is it to take action $a$ from state $s$?" After taking action $a$, landing in state $s'$, and collecting reward $r$, the table entry updates by the Bellman equation:
+The agent learns a **Q-function**: Q(s, a) — in driving terms, your gut-feel rating for "turning this way, from this corner, given today's traffic." Every time you actually take a turn and see how it goes, you don't discard your old gut-feel and replace it wholesale. You nudge it, a little, toward what you just learned. After taking action *a*, landing in state *s′*, and collecting reward *r*, that nudge is the Bellman update:
 
-$$Q(s,a) \leftarrow Q(s,a) + \alpha \Big[r + \gamma \cdot \max_{a'} Q(s', a') - Q(s,a)\Big]$$
+```
+Q(s,a) ← Q(s,a) + α [ r + γ · max Q(s′,a′) − Q(s,a) ]
+```
 
-| Symbol | Meaning |
-|--------|---------|
-| $\alpha$ | Learning rate — how much to shift toward new information (0.15) |
-| $\gamma$ | Discount factor — how much to value future vs. immediate rewards (0.9) |
-| $r + \gamma \max Q(s',a')$ | Bellman target — what Q *should* be |
-| The bracket term | TD error — the surprise, used to nudge Q toward the target |
+Read the nudge as three ingredients, each with a driving-world meaning:
 
-Training balances exploration against exploitation with an ε-greedy policy: with probability ε the agent takes a random action (explore), otherwise it takes the best action it currently knows (exploit). ε starts at 0.5 and decays to 0.05 as training progresses, so the agent wanders early and commits later.
+```
+Symbol                  Meaning
+────────────────────────────────────────────────────────────────
+α (alpha)               Learning rate — how much one trip is
+                          allowed to move your opinion. A stubborn
+                          driver (low α) barely updates after a
+                          single experience; a jumpy one (high α)
+                          overreacts to every fluke. Set to 0.15.
+γ (gamma)               Discount factor — how much weight you give
+                          the rest of the journey beyond just this
+                          turn. Low γ only cares about the next
+                          block; high γ is already thinking about
+                          the airport. Set to 0.9.
+r + γ·max Q(s′,a′)      Bellman target — what Q *should* be, given
+                          what you just experienced plus your best
+                          guess about everything still ahead.
+The bracket term        TD (Temporal Difference) error — the surprise. The gap between
+                          what you expected this turn to be worth
+                          and what it turned out to be worth once
+                          you saw where it led. A big surprise means
+                          a big correction; no surprise means the
+                          hunch barely moves.
+```
 
-What the agent ends up with is not a single path. It is a *policy table* — a lookup mapping (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search. That is the appeal: instant decisions, no recomputation.
+Back to the learner-driver: at every intersection, you flip a weighted coin before deciding which way to turn. Heads, with probability ε, you take a random turn anyway — just to see where it leads. Tails, you take the turn you currently believe is fastest. On day one you don't trust your own judgment yet, so the coin is heavily weighted toward "explore anything" — ε starts at 0.5, meaning half your turns are deliberate detours into streets you haven't tried. As the trips pile up, you re-weight the coin toward "drive the route I already trust" — ε decays to 0.05, so by the end you're almost always taking the turn you believe in, only rarely still poking down an unfamiliar street just in case the city changed. That is ε-greedy: wander when you know little, commit once you know more.
+
+What the agent ends up with, after enough trips, is not a memorised single best route from source to destination. It is closer to a driver's accumulated hunches at every intersection they've ever stood at — "from this corner, in this traffic, go left" — instantly recalled, never recalculated. Formally, that is a *policy table*: a lookup mapping (node, risk_level) → best_next_node. At inference time, routing is a table lookup, not a graph search. That is the appeal: instant decisions, no recomputation.
 
 It is also the limitation. The table only knows what it visited during training.
 
 ### Why the Q-table Broke
 
-The Q-learning agent built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest.
+Stretch the driving analogy one step further. The learner-driver above never actually learned the whole city's traffic — they learned one road's traffic report (how bad is the Hormuz route right now?) and used it as a stand-in for conditions everywhere. That is why the notebook of hunches stayed thin: 19 intersections × 5 traffic levels = 95 pages, memorisable in an afternoon of driving.
 
-This works when the state space is small. The agent above keeps state deliberately compact: `(current_node, Hormuz_risk_bucket)` — 19 nodes × 5 buckets = 95 states. The agent could cover all of them in a few hundred episodes, which is exactly why it stayed tabular rather than falling over.
+Now imagine the city instead hands you a live, independently-updating traffic report for 24 different roads at once, and asks for a hunch covering every combination of conditions across all of them. That is not a notebook anymore — it is 19 × 5²⁴ ≈ 60 trillion pages. No driver fills that notebook in a lifetime of trips, let alone a few hundred training episodes.
 
-The compactness is the tell. A table can only stay small if you throw away information — here, all risk data except the Hormuz average. v2's graph carries a live, independently evolving risk value on all 24 edges, not just Hormuz's. A state that actually captures that is `(current_node, risk_on_all_24_edges)`. Even discretised to 5 levels per edge, that is 19 × 5²⁴ ≈ 60 trillion entries.
+That is exactly the trap the Q-learning agent above was built to avoid, and exactly the wall it hits the moment you stop letting it avoid it. The agent built a lookup table — one entry per (state, action) pair, updated every time that pair was visited. After training, it simply looked up the Q-value for every available action and chose the highest. This works when the state space is small, which is exactly why the agent above deliberately kept its state compact: (current_node, Hormuz_risk_bucket) — 95 states, coverable in a few hundred episodes.
+
+The compactness is the tell. A table can only stay small if you throw away information — here, all risk data except the Hormuz average. v2's graph carries a live, independently evolving risk value on all 24 edges, not just Hormuz's. A state that actually captures that is (current_node, risk_on_all_24_edges) — the 60-trillion-page notebook above.
 
 Here is what 60 trillion looks like in training terms:
 
-| Agent | State Space | States Visited (600 episodes) | Coverage |
-|-------|-------------|-------------------------------|---------|
-| Q-Learning (as trained, compact state) | 95 | ~95 | ~100% |
-| Q-Learning (hypothetical, full 24-edge state) | 60 trillion | ~18,000 | 0.00003% |
-| DQN | Continuous ℝ⁴³ | — | Interpolates |
+```
+Agent                                        State Space     States Visited    Coverage
+                                                              (600 episodes)
+─────────────────────────────────────────────────────────────────────────────────────────
+Q-Learning (as trained, compact state)       95              ~95               ~100%
+Q-Learning (hypothetical, full 24-edge)      60 trillion     ~18,000           0.00003%
+DQN                                          Continuous ℝ⁴³  —                 Interpolates
+```
 
-*[Visual suggestion: An infographic showing three representations side by side. Left: a small 10×10 grid, mostly filled with colour — Q-learning's compact state space, nearly fully explored. Centre: a vast grid extending beyond the frame, with a tiny cluster of coloured cells in one corner — what the tabular approach would face on the full 24-edge state, vanishingly sparse. Right: a smooth gradient surface representing the DQN's continuous approximation — no empty cells, because coverage is by interpolation, not enumeration.]*
+*Image: three state-space representations side by side — a fully-explored small grid, a vast sparse grid, and a smooth interpolated surface.*
 
-For every unvisited state, the Q-table returns Q = 0. When all actions have Q = 0, argmax picks the first neighbour in dictionary order. Not random — *deterministic*, but meaningless. The agent doesn't know it's lost. It just happens to always pick the same direction. In a crisis, when the routing decision matters most, this is exactly when novel risk combinations appear.
+For every unvisited state, the Q-table returns Q = 0. When all actions have Q = 0, argmax picks the first neighbour in dictionary order. Not random — *deterministic*, but meaningless. It is the driver arriving at an intersection with a blank page in the notebook, and turning left anyway, every single time, simply because "left" happens to be listed first — not because it's ever been right. The driver doesn't know they're lost. They just happen to always pick the same direction. In a crisis, when the routing decision matters most, this is exactly when novel risk combinations appear.
 
 At test time, a tabular agent run against the full 24-edge state produced random-equivalent paths for roughly 40% of novel risk configurations.
 
@@ -264,7 +299,7 @@ Network:
   argmax  →  routing decision
 ```
 
-*[Visual suggestion: A clean network diagram — 43-dim input bar on the left, widening to 256 in the first hidden layer, narrowing to 128, then to 19 output Q-values. The 19 Q-values shown as a bar chart on the right, with a few bars greyed out (masked to −∞ for unreachable nodes) and the highest bar highlighted as the chosen action. Annotate: ~47,000 parameters.]*
+*Image: network diagram — 43-dim input widening to 256, narrowing to 128, then 19 Q-values as a bar chart with the highest bar highlighted. ~47,000 parameters.*
 
 A state the network has never seen is not a cold miss. It passes through the network and produces Q-value estimates by interpolating from similar states in the high-dimensional space where it has trained. A crisis at severity 0.91 benefits from what the network learned at 0.88 and 0.94. The generalisation is not guaranteed to be perfect — but it degrades gracefully rather than collapsing to zero.
 
@@ -278,17 +313,17 @@ Training a deep Q-network naively — update the network on each transition as i
 
 The fix: an **experience replay buffer**. A circular deque holding 10,000 past transitions. At each training step, 64 are sampled uniformly at random — decorrelated, diverse, drawn from ~700 different past episodes.
 
-*[Visual suggestion: A simple diagram — left side shows a linear episode chain (s₁ → s₂ → s₃ ...) with transitions highlighted in sequence; right side shows a circular buffer with a random sampling arrow pulling non-adjacent transitions into a mini-batch. Label the buffer capacity (10,000) and batch size (64). The point — breaking correlation — should be visually immediate.]*
+*Image: a linear episode chain next to a circular buffer with a random sampling arrow pulling non-adjacent transitions into a mini-batch.*
 
-**The moving target problem.** The Bellman update target is `r + γ · max Q(s', a'; θ)` — but θ is the same set of parameters being updated. Every gradient step changes the target, which changes the gradient, which changes θ again. The network chases a target that moves with every step. Q-values oscillate and diverge.
+**The moving target problem.** The Bellman update target is r + γ · max Q(s′, a′; θ) — but θ is the same set of parameters being updated. Every gradient step changes the target, which changes the gradient, which changes θ again. The network chases a target that moves with every step. Q-values oscillate and diverge.
 
 The fix: a **frozen target network**. A second copy of the DQN whose parameters are not updated during gradient steps. The Bellman target uses the frozen copy. Every 100 steps, the frozen copy is hard-updated from the current policy network. For those 100 steps, the target is stationary — the network has something stable to converge toward.
 
-*[Visual suggestion: Two identical network boxes. Left: "Policy Net θ" with a gradient update arrow coming in from the loss. Right: "Target Net θ⁻" with a dashed "hard copy every 100 steps" arrow coming from the policy net. The Bellman equation annotated between them: y = r + γ · Q_θ⁻(s', a'). A clock icon with "100 steps" makes the timing concrete.]*
+*Image: two network boxes — "Policy Net θ" updated by gradient descent, "Target Net θ⁻" hard-copied from it every 100 steps.*
 
 One more choice: **Huber loss** instead of MSE. Early in training, TD errors — the gap between predicted Q-values and Bellman targets — are large and noisy. MSE squares these errors and amplifies them, causing large gradient spikes. Huber loss behaves like MSE for small errors and like MAE for large ones, capping the gradient during the chaotic early phase. In practice, Huber loss reduced TD error variance by ~60% in the first 100 episodes.
 
-*[Visual suggestion: Two-panel training chart. Left panel: episode reward curve over 600 episodes — thin noisy line in red, rolling mean in orange trending upward from large-negative to a stable plateau near zero. Right panel: Huber loss curve declining from ~0.5 to ~0.05, with periodic small spikes at the 100-step target network sync points (annotated). Both panels show a system that is learning, not oscillating.]*
+*Image: two-panel training chart — episode reward climbing from large-negative to a stable plateau; Huber loss declining from ~0.5 to ~0.05.*
 
 **The conclusion:** the DQN solves the scaling problem the Q-table couldn't. It generalises by interpolation rather than enumeration, and it trains stably because experience replay and the target network eliminate the two root causes of naive deep RL instability.
 
@@ -302,24 +337,26 @@ On every simulation tick, this is what happens:
 
 1. The LSTM reads the rolling window of the last 10 timesteps — risk, oil volatility, insurance premium, and sentiment across all 24 edges — and produces a predicted risk vector: one number per edge, for the *next* timestep.
 
-2. Those predicted values are written directly into the graph. `G[u][v]["risk"] = LSTM_prediction`. The graph now reflects forecast risk, not current risk.
+2. Those predicted values are written directly into the graph: `G[u][v]["risk"] = LSTM_prediction`. The graph now reflects forecast risk, not current risk.
 
-3. The DQN reads the updated graph and constructs its state vector: `[one_hot(current_node) || predicted_edge_risks]`. It selects the highest-Q action among reachable neighbours.
+3. The DQN reads the updated graph and constructs its state vector: one-hot(current node) plus predicted edge risks. It selects the highest-Q action among reachable neighbours.
 
 4. Dijkstra, running in parallel on the same graph, also reads the updated edge weights and finds the minimum-weight path.
 
 The difference is that the DQN's policy was trained to route based on predicted risk, and has built up an implicit understanding of which states predict crises. Dijkstra simply minimises the current weighted cost. Both systems are reading the LSTM's forecast — but the DQN has *learned* what that forecast means for routing, across 600 training episodes.
 
-*[Visual suggestion: A three-lane swimlane diagram, read left to right across a timeline. Top lane — "LSTM": signal window → LSTM → risk forecast vector, with the sentiment line visibly dropping 5 steps before the crisis marker. Middle lane — "Graph": risk vector written into edge weights, edges on the map transitioning from green → amber → red. Bottom lane — two sub-lanes side by side: "DQN" and "Dijkstra." A vertical dashed line marks "crisis onset." To the left of the line: DQN lane shows "bypass route selected," Dijkstra lane shows "Hormuz route." To the right: both converge on bypass. The DQN pre-emption window is shaded and labelled "7-step advance."]*
+*Image: swimlane diagram — LSTM signal window → risk forecast → graph edges shifting green → amber → red → DQN and Dijkstra diverging at crisis onset, then reconverging.*
 
 Here is what this looks like at the level of a single crisis event:
 
-| Steps from Crisis Peak | Sentiment | Insurance | Actual Risk | LSTM Forecast | DQN Routing | Dijkstra |
-|------------------------|-----------|-----------|-------------|---------------|-------------|----------|
-| −5 | Dropping | Flat | Low | Rising | Begins preferring bypass | Hormuz |
-| −3 | Low | Slightly rising | Moderate | High | Bypass | Hormuz |
-| 0 (peak) | Low | Still catching up | High | High | Bypass | Bypass |
-| +7 | Recovering | Still elevated | Declining | Declining | Returns to Hormuz | Hormuz |
+```
+Steps from Peak   Sentiment    Insurance          Actual Risk   LSTM Forecast   DQN Routing                Dijkstra
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+−5                Dropping     Flat               Low           Rising          Begins preferring bypass   Hormuz
+−3                Low          Slightly rising    Moderate      High            Bypass                     Hormuz
+0 (peak)          Low          Still catching up  High          High            Bypass                     Bypass
++7                Recovering   Still elevated     Declining     Declining       Returns to Hormuz           Hormuz
+```
 
 The market — represented here by the insurance premium — doesn't finish catching up until after the peak. The DQN rerouted three steps before the market finished deciding.
 
@@ -333,34 +370,38 @@ v1 introduced the economic cascade model as five broad stages, without day count
 
 The timeline: oil spikes within days 1–7, with the size of the spike a function of expected duration —
 
-| Duration | Price Multiplier | Historical Calibration |
-|----------|-----------------|----------------------|
-| ≤ 7 days | 3.5× | 2019 Abqaiq attack: oil +15% |
-| ≤ 30 days | 5.5× | 2005 Hurricane Katrina: oil +25% |
-| ≤ 90 days | 8.0× | 1990 Gulf War: oil +60% |
-| > 90 days | 12.0× | 1973 Arab Embargo: oil +400% |
+```
+Duration    Price Multiplier   Historical Calibration
+─────────────────────────────────────────────────────────────
+≤ 7 days    3.5×               2019 Abqaiq attack: oil +15%
+≤ 30 days   5.5×               2005 Hurricane Katrina: oil +25%
+≤ 90 days   8.0×               1990 Gulf War: oil +60%
+> 90 days   12.0×              1973 Arab Embargo: oil +400%
+```
 
 — buffered partly by OPEC spare capacity (~35% offset) and the IEA's Strategic Petroleum Reserve (~17 days of full Hormuz flow), though a panic premium kicks in above severity 0.5 as inventory hoarding overshoots. Freight rates reprice in days 8–30 (Cape rerouting adds 14 days and ~$630k in bunker costs per voyage; in the 2019 Abqaiq episode the TD3C spot rate moved WS 60→300 in days). Consumer prices follow with a ~30-day lag, and food prices with a ~45-day lag through energy, fertiliser, and freight costs compounding together. Central banks respond in months 2–6, tightening into a supply shock they can't otherwise fix — each 1% of unexpected CPI implies roughly 50bps of tightening and 0.15% of GDP contraction through the credit channel, arriving after the direct shock and outlasting it.
 
 The regional breakdown is refined from v1's version, now sourced to an IMF working paper and expressed as pass-through coefficients rather than ranges:
 
-| Region | Oil Import Dependency | CPI Pass-Through | GDP Impact per 10% Oil Rise |
-|--------|----------------------|-----------------|----------------------------|
-| East Asia (Japan/Korea/China) | 85% | 0.18 | −0.40% |
-| India | 85% | 0.16 | −0.50% |
-| Europe | 55% | 0.13 | −0.28% |
-| USA | 15% | 0.08 | −0.15% |
-| Developing Markets | 80% | 0.22 | −0.60% |
-
+```
+Region                          Oil Import      CPI Pass-   GDP Impact per
+                                 Dependency      Through     10% Oil Rise
+─────────────────────────────────────────────────────────────────────────
+East Asia (Japan/Korea/China)   85%             0.18        −0.40%
+India                           85%             0.16        −0.50%
+Europe                          55%             0.13        −0.28%
+USA                             15%             0.08        −0.15%
+Developing Markets              80%             0.22        −0.60%
+```
 *Source: IMF Working Paper 17/53 (Gelos & Ustyugova 2017)*
 
 East Asia absorbs roughly four times the GDP shock the USA does from an identical oil price move — same physical event, five different economic experiences.
 
 **What's actually new: Monte Carlo on the cascade itself.** We ran 500 scenarios across the full range of severities and durations and looked at the distribution of *economic* outcomes, not routing cost. The 95th-percentile tail: oil +90–120%, global CPI +9–12%, global food prices +45–65%, GDP −2.5% to −4.0%. These aren't worst-case hypotheticals — they're the top five percent of a realistic disruption distribution, and unlike v1's routing-focused Monte Carlo, they're the number a planner would actually need to size a reserve or a hedge against.
 
-*[Visual suggestion: Three-panel Monte Carlo histogram — oil price change (%), global CPI impact, global food price change. Each panel: bars showing the frequency distribution across 500 scenarios, with a median marker, a 95th percentile marker, and a vertical orange line showing the current scenario.]*
+*Image: Monte Carlo histograms for oil price, CPI, and food price change across 500 scenarios, with median and 95th-percentile markers.*
 
-*[Visual suggestion: Grouped bar chart — five regions on x-axis, three bars per group (headline CPI, food price change, GDP impact) for a 90-day moderate-severity scenario, making the geographic asymmetry immediate.]*
+*Image: grouped bar chart by region (CPI, food price, GDP impact) — East Asia tallest, USA barely visible at the same scale.*
 
 **The conclusion, unchanged from v1 but now quantified at the tail:** the cost of a Hormuz closure isn't the rerouting surcharge — it's oil volatility compounding into freight, into consumer inflation, into food prices, into central bank tightening, unequally by geography. The routing model tells you what to do. The cascade model, now with a tail distribution attached, tells you what's at stake if you don't.
 
@@ -370,25 +411,35 @@ East Asia absorbs roughly four times the GDP shock the USA does from an identica
 
 Here is what the full v2 system trains to:
 
-| Component | Parameters | What It Does |
-|-----------|-----------|--------------|
-| LSTM Risk Predictor | ~251,000 | Reads 10-step signal window; predicts next-step risk across 24 edges |
-| DQN Policy Network | ~47,000 | Maps 43-dim state to Q-values; selects routing action |
-| DQN Target Network | ~47,000 | Frozen copy of policy net; provides stable Bellman targets |
-| **Total** | **~350,000** | **Anticipatory routing: perceives before the market, routes before the crisis** |
+```
+Component               Parameters   What It Does
+─────────────────────────────────────────────────────────────────────
+LSTM Risk Predictor      ~251,000    Reads 10-step signal window; predicts
+                                       next-step risk across 24 edges
+DQN Policy Network       ~47,000     Maps 43-dim state to Q-values;
+                                       selects routing action
+DQN Target Network       ~47,000     Frozen copy of policy net; provides
+                                       stable Bellman targets
+──────────────────────────────────────────────────────────────────────
+Total                    ~350,000    Anticipatory routing: perceives
+                                       before the market, routes before
+                                       the crisis
+```
 
 And here is the comparison that matters:
 
-| Scenario | Q-Learning (baseline) | LSTM + DQN (v2) |
-|----------|------------------------|-----------------|
-| Normal conditions | Correct — Hormuz route | Correct — Hormuz route |
-| Seen crisis severity | Correct bypass | Correct bypass |
-| Unseen risk combination | ~40% random paths | Principled interpolated estimate |
-| 7 steps before crisis peak | No rerouting | Begins preferring bypass |
-| Post-crisis recovery | Abrupt switch back | Smooth decay following LSTM forecast |
-| Novel route not in training | Q = 0, meaningless | Non-zero Q from similar states |
+```
+Scenario                        Q-Learning (baseline)     LSTM + DQN (v2)
+──────────────────────────────────────────────────────────────────────────
+Normal conditions                Correct — Hormuz route    Correct — Hormuz route
+Seen crisis severity              Correct bypass            Correct bypass
+Unseen risk combination           ~40% random paths         Principled interpolated estimate
+7 steps before crisis peak        No rerouting              Begins preferring bypass
+Post-crisis recovery              Abrupt switch back        Smooth decay following LSTM forecast
+Novel route not in training       Q = 0, meaningless        Non-zero Q from similar states
+```
 
-*[Visual suggestion: Q-value heatmap — rows are current nodes (19), columns are possible next nodes (19), cell colour encodes Q-value from blue (low) to red (high). Show two versions: one at low Hormuz risk (producer rows show high Q toward Hormuz), one at high Hormuz risk (those cells cool, Yanbu and Fujairah cells warm). The shift in the colour pattern is the agent's learned crisis response, made visible.]*
+*Image: Q-value heatmap (rows = current node, columns = next node), shown at low vs. high Hormuz risk — the colour pattern shift is the agent's learned crisis response.*
 
 ---
 
@@ -416,14 +467,14 @@ A system that reads the leading indicators — that has learned the 7-step gap b
 
 In logistics, earlier than the market is the only advantage that actually matters.
 
-> Redundancy beats efficiency.  
-> Optionality beats optimisation.  
+> Redundancy beats efficiency.
+> Optionality beats optimisation.
 > And anticipation beats reaction.
 
 ---
 
-*v2 stack: NetworkX · Plotly · Streamlit · NumPy · PyTorch · scikit-learn*  
+*v2 stack: NetworkX · Plotly · Streamlit · NumPy · PyTorch · scikit-learn*
 *~350,000 parameters. LSTM risk engine + DQN routing agent + economic cascade across five global regions.*
 
-> **Try V1 live:** [the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)  
+> **Try V1 live:** [the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)
 > **Source code:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main)
