@@ -170,10 +170,7 @@ def generate_synthetic_data(G: nx.DiGraph, n_steps: int = 2000,
     edges = list(G.edges())
     n_edges = len(edges)
 
-    risks      = np.array([G[u][v]["base_risk"] for u, v in edges], dtype=float)
-    oil_vol    = np.full(n_edges, 0.30)
-    insurance  = risks.copy()
-    sentiment  = np.full(n_edges, 0.50)
+    risks = np.array([G[u][v]["base_risk"] for u, v in edges], dtype=float)
 
     # Simulate structured disruption events
     event_times = rng.choice(range(150, n_steps - 150), n_events, replace=False)
@@ -183,18 +180,19 @@ def generate_synthetic_data(G: nx.DiGraph, n_steps: int = 2000,
                    if (u, v) in [("Red Sea", "Bab-el-Mandeb"),
                                   ("Bab-el-Mandeb", "Suez Canal")]]
 
-    data = np.zeros((n_steps, n_edges, N_FEATURES))
-
+    # ── Pass 1: simulate the full risk trajectory first. Oil vol and
+    # insurance only ever need *past or current* risk, but sentiment needs
+    # to react to risk that hasn't happened yet (a genuine leading
+    # indicator), which is only possible if the whole trajectory already
+    # exists to look ahead into.
+    all_risks = np.zeros((n_steps, n_edges))
     for t in range(n_steps):
-        # OU mean-reversion for all edges
         for i, (u, v) in enumerate(edges):
-            mu    = G[u][v]["base_risk"]
+            mu = G[u][v]["base_risk"]
             risks[i] = np.clip(
                 risks[i] + 0.3 * (mu - risks[i]) + 0.07 * rng.standard_normal(),
                 0.0, 1.0
             )
-
-        # Disruption events
         for k, et in enumerate(event_times):
             if t == et:
                 sev    = rng.uniform(0.30, 0.65)
@@ -202,29 +200,44 @@ def generate_synthetic_data(G: nx.DiGraph, n_steps: int = 2000,
                 target = hormuz_idxs if kind < 2 else bamel_idxs
                 for i in target:
                     risks[i] = min(1.0, risks[i] + sev)
-                # Decay over 20 steps (handled by OU above — spike fades)
+                # Decay over subsequent steps handled by OU above.
+        all_risks[t] = risks
 
-        # Oil volatility: mean-reverts to (0.25 + 0.5 * avg_hormuz_risk)
-        hormuz_avg = float(np.mean(risks[hormuz_idxs])) if hormuz_idxs else 0.28
+    # ── Pass 2: derive oil_vol (concurrent), insurance (lagged 7-10 steps),
+    # and sentiment (leading 3-5 steps) from that trajectory.
+    oil_vol   = np.full(n_edges, 0.30)
+    insurance = all_risks[0].copy()
+    sentiment = np.full(n_edges, 0.50)
+    lead      = rng.integers(3, 6)  # sentiment looks this many steps ahead
+
+    data = np.zeros((n_steps, n_edges, N_FEATURES))
+
+    for t in range(n_steps):
+        risks_now    = all_risks[t]
+        risks_future = all_risks[min(t + lead, n_steps - 1)]
+
+        # Oil volatility: mean-reverts to a function of current Hormuz risk.
+        hormuz_avg = float(np.mean(risks_now[hormuz_idxs])) if hormuz_idxs else 0.28
         oil_vol[:] = np.clip(
             oil_vol + 0.15 * (0.25 + 0.5 * hormuz_avg - oil_vol)
             + 0.04 * rng.standard_normal(n_edges), 0.0, 1.0
         )
 
-        # Insurance: lagged risk (slow response)
+        # Insurance: lagged risk (slow response to what already happened).
         insurance[:] = np.clip(
-            0.85 * insurance + 0.15 * risks + 0.015 * rng.standard_normal(n_edges),
+            0.85 * insurance + 0.15 * risks_now + 0.015 * rng.standard_normal(n_edges),
             0.0, 1.0
         )
 
-        # Sentiment: leading indicator (high sentiment = low tension)
-        # Drops ~3-8 steps BEFORE risk rises (approximated by inverse of risk trend)
+        # Sentiment: genuine leading indicator (high sentiment = low
+        # tension). Reacts to risk `lead` steps in the future, so it
+        # visibly moves before the risk trajectory it's anticipating.
         sentiment[:] = np.clip(
-            0.80 * sentiment + 0.20 * (1.0 - risks)
+            0.70 * sentiment + 0.30 * (1.0 - risks_future)
             + 0.04 * rng.standard_normal(n_edges), 0.0, 1.0
         )
 
-        data[t, :, 0] = risks
+        data[t, :, 0] = risks_now
         data[t, :, 1] = oil_vol
         data[t, :, 2] = insurance
         data[t, :, 3] = sentiment
@@ -626,10 +639,11 @@ class DQNAgent:
             if progress_cb:
                 progress_cb((ep + 1) / episodes)
 
-    def greedy_path(self, source: str, target: str, max_steps: int = 30) -> list:
+    def greedy_path(self, source: str, target: str, max_steps: int = 30,
+                     edge_risks: np.ndarray | None = None) -> list:
         old, self.epsilon = self.epsilon, 0.0
         node, path, seen = source, [source], {source}
-        er = self._edge_risks_array()
+        er = edge_risks if edge_risks is not None else self._edge_risks_array()
         for _ in range(max_steps):
             if node == target:
                 break
@@ -1057,6 +1071,7 @@ if "G" not in st.session_state:
     # DQN
     st.session_state.dqn_agent    = None
     st.session_state.crisis       = False
+    st.session_state.demo_active  = False
 
 G         = st.session_state.G
 NODE_LIST = st.session_state.node_list
@@ -1115,6 +1130,7 @@ with st.sidebar:
     st.caption(f"Risk engine: **{mode_label}**")
 
     def _step(n=1):
+        st.session_state.demo_active = False
         lstm = st.session_state.lstm_model
         win  = st.session_state.risk_window
         for _ in range(n):
@@ -1141,6 +1157,7 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🔥 Hormuz Crisis", use_container_width=True, type="primary"):
+        st.session_state.demo_active = False
         for u, v in G.edges():
             if G[u][v].get("hormuz_dependent"):
                 G[u][v]["risk"] = float(np.clip(0.90 + np.random.uniform(-0.05, 0.05), 0, 1))
@@ -1490,7 +1507,44 @@ with tab3:
             st.plotly_chart(fig_l, use_container_width=True)
 
         st.markdown("### DQN vs Q-Learning vs Dijkstra Path Comparison")
-        dqn_path  = agent.greedy_path(source, target)
+
+        lstm = st.session_state.lstm_model
+        demo_col1, demo_col2 = st.columns([1, 2])
+        with demo_col1:
+            demo_disabled = lstm is None
+            if st.button("🎯 Load Divergence Demo", use_container_width=True,
+                         disabled=demo_disabled,
+                         help="Requires a trained LSTM (Training tab)."):
+                # Craft the "-5 steps from peak" scenario from the blog:
+                # sentiment already dropping while actual risk, insurance,
+                # and oil vol are all still calm. Real signals a Lloyd's
+                # underwriter wouldn't yet be pricing in.
+                window = np.zeros((SEQ_LEN, N_EDGES, N_FEATURES))
+                for i, (u, v) in enumerate(EDGE_LIST):
+                    base = G[u][v]["base_risk"]
+                    window[:, i, 0] = base                               # risk: flat
+                    window[:, i, 1] = np.clip(base * 0.8 + 0.1, 0, 1)     # oil vol: flat
+                    window[:, i, 2] = np.clip(base * 0.7, 0, 1)           # insurance: flat
+                    sentiment_start = np.clip((1 - base) * 0.8, 0, 1)
+                    window[:, i, 3] = np.linspace(sentiment_start, sentiment_start * 0.4, SEQ_LEN)
+                st.session_state.risk_window = window
+                for u, v in G.edges():
+                    if G[u][v].get("hormuz_dependent"):
+                        G[u][v]["risk"] = G[u][v]["base_risk"]
+                st.session_state.demo_active = True
+        with demo_col2:
+            if demo_disabled:
+                st.caption("Train the LSTM first (Training tab) to enable this.")
+            elif st.session_state.get("demo_active"):
+                st.caption("Demo active: sentiment is falling while Hormuz risk is still at "
+                           "baseline. DQN routes on the LSTM's forecast; Dijkstra and "
+                           "Q-Learning only see today's (still-calm) numbers.")
+
+        if st.session_state.get("demo_active") and lstm is not None and st.session_state.risk_window is not None:
+            forecast  = lstm.predict_next(st.session_state.risk_window)
+            dqn_path  = agent.greedy_path(source, target, edge_risks=forecast)
+        else:
+            dqn_path  = agent.greedy_path(source, target)
         _, d_path = risk_dijkstra(G, source, target, alpha, lam)
         q_agent   = st.session_state.q_agent
         q_path    = q_agent.greedy_path(G, source, target) if q_agent else None
