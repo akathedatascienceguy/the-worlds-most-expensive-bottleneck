@@ -184,9 +184,9 @@ The market, represented by the insurance premium, doesn't finish catching up unt
 
 ## Step 5: What the Disruption Actually Costs
 
-v1 introduced the economic cascade model as five broad stages with no day counts. V2 pins it to an explicit timeline and, more substantively, runs 500 Monte Carlo scenarios through the cascade's economic outputs, not just routing cost the way v1's Monte Carlo did.
+v1 modelled the cascade as five broad stages with no day counts. V2 pins it to an explicit timeline and, more importantly, runs 500 Monte Carlo scenarios through the cascade's economic outputs, not just routing cost the way v1's Monte Carlo did.
 
-Oil spikes within days 1 to 7, sized by expected duration:
+Oil spikes within days 1 to 7, sized by how long the market expects the disruption to last:
 
 ```
 Duration    Price Multiplier   Historical Calibration
@@ -197,9 +197,11 @@ Duration    Price Multiplier   Historical Calibration
 > 90 days   12.0x              1973 Arab Embargo: oil +400%
 ```
 
-Buffered partly by OPEC spare capacity (about 35% offset) and the SPR (about 17 days of full Hormuz flow), though a panic premium kicks in above severity 0.5. Freight reprices in days 8 to 30 (Cape rerouting: 14 extra days, about $630k per voyage). Consumer prices follow with a 30-day lag, food with 45 days, and central banks tighten in months 2 to 6, each 1% of unexpected CPI implying roughly 50bps of tightening and 0.15% of GDP contraction, arriving after the direct shock and outlasting it.
+The supply side buys time before it doesn't: OPEC spare capacity offsets about 35% of the disruption, and the SPR covers roughly 17 days of full Hormuz flow. Above severity 0.5, though, a panic premium takes over, inventory hoarding pushing prices past what fundamentals alone justify. Freight follows within days 8 to 30 (Cape rerouting: 14 extra days, about $630k per voyage).
 
-The regional breakdown is now sourced to an IMF working paper, as pass-through coefficients rather than ranges:
+The demand side lags further behind: consumer prices by about 30 days, food by about 45, as the shock works through the supply chain. Central banks respond in months 2 to 6, tightening into a supply-side shock rate hikes can't actually fix, each 1% of unexpected CPI implying roughly 50bps of tightening and 0.15% of GDP contraction. A second wave, arriving after the first and outlasting it.
+
+That cost also isn't evenly distributed. The regional breakdown, now sourced to an IMF working paper as pass-through coefficients rather than ranges:
 
 ```
 Region                          Oil Import      CPI Pass-   GDP Impact per
@@ -213,15 +215,17 @@ Developing Markets              80%             0.22        -0.60%
 ```
 Source: IMF Working Paper 17/53 (Gelos & Ustyugova 2017)
 
-East Asia absorbs roughly four times the GDP shock the USA does from an identical oil price move.
+East Asia absorbs roughly four times the GDP shock the USA does, from the identical oil price move.
 
-**What's actually new:** Monte Carlo on the cascade itself. 500 scenarios across the full range of severities and durations, looking at economic outcome distributions rather than routing cost. The 95th-percentile tail: oil +90 to 120%, global CPI +9 to 12%, food +45 to 65%, GDP -2.5% to -4.0%. That's the top five percent of a realistic distribution, and the number a planner would actually need to size a reserve or hedge against.
+**What's actually new:** running that cascade through 500 Monte Carlo scenarios, across the full range of severities and durations, and looking at the distribution of economic outcomes rather than just routing cost. The 95th-percentile tail: oil +90 to 120%, global CPI +9 to 12%, food +45 to 65%, GDP -2.5% to -4.0%. Not a worst case; the top five percent of a realistic distribution, and the number a planner would actually need to size a reserve or hedge against.
 
 **The conclusion, unchanged from v1 but now quantified at the tail:** the cost of a Hormuz closure isn't the rerouting surcharge. It's oil volatility compounding into freight, inflation, food prices, and central bank tightening, unequally by geography. The routing model tells you what to do. The cascade model tells you what's at stake if you don't.
 
 ---
 
 ## The Numbers, Plainly
+
+What the full system trains to:
 
 ```
 Component               Parameters   What It Does
@@ -232,6 +236,8 @@ DQN Target Network       ~47,000     Frozen copy; stable Bellman targets
 ──────────────────────────────────────────────────────────────────────
 Total                    ~350,000    Anticipatory routing
 ```
+
+And what those parameters actually buy, against the baseline:
 
 ```
 Scenario                        Q-Learning (baseline)     LSTM + DQN (v2)
@@ -247,9 +253,9 @@ Novel route not in training       Q = 0, meaningless        Non-zero Q from simi
 
 ## What V2 Is, Actually
 
-Strip away the implementation and the question is: can you see a disruption coming before you're already inside it? Yes, under one condition. If leading signals (sentiment, AIS anomalies, diplomatic tension) are available and correlated with actual risk, a trained LSTM can anticipate the trajectory 7 steps before lagging indicators finish repricing. The DQN answers the second question, not what do I see but what do I do with it: a policy that generalises across an effectively infinite state space.
+Strip away the implementation and the question is simple: can you see a disruption coming before you're already inside it? Yes, under one condition: if leading signals (sentiment, AIS anomalies, diplomatic tension) are available and correlated with actual risk, a trained LSTM can anticipate the trajectory 7 steps before lagging indicators finish repricing. The DQN answers the harder question, not what do I see but what do I do with it, a policy that generalises across an effectively infinite state space instead of memorising a slice of it.
 
-v1 ended with a claim: the system fails not because alternatives don't exist, but because we over-commit to the cheapest route. v2 goes one layer deeper. The market doesn't just fail to pay the resilience premium, it fails to see the crisis coming in time to act. By the time premiums have repriced and freight has spiked, the window has narrowed. A system that reads leading indicators and routes on predicted risk rather than observed risk has a different decision horizon: not infinite, not omniscient, but earlier than the market. In logistics, earlier than the market is the only advantage that actually matters.
+v1 ended with a claim: the system fails not because alternatives don't exist, but because we over-commit to the cheapest route. v2 goes one layer deeper. The market doesn't just fail to pay the resilience premium, it fails to see the crisis coming in time to act on it. By the time premiums have repriced and freight has spiked, the window has already narrowed. Reading the leading indicators instead of the lagging ones buys a different decision horizon: not infinite, not omniscient, just earlier than the market. In logistics, that's the only advantage that actually matters.
 
 > Redundancy beats efficiency.
 > Optionality beats optimisation.

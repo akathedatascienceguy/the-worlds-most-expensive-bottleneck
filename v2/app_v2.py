@@ -1145,7 +1145,21 @@ with st.sidebar:
             if G[u][v].get("hormuz_dependent"):
                 G[u][v]["risk"] = float(np.clip(0.90 + np.random.uniform(-0.05, 0.05), 0, 1))
         st.session_state.crisis = True
-        _step(1)
+        st.session_state.t += 1
+        # Sync the LSTM's rolling window to the crisis risk we just set,
+        # without calling _lstm_step / _ou_step, which would immediately
+        # overwrite (LSTM: from a stale pre-crisis window) or decay
+        # (OU: mean-reversion) the spike before Dijkstra ever sees it.
+        if st.session_state.risk_window is not None:
+            st.session_state.risk_window = _advance_window(
+                st.session_state.risk_window, G, vol)
+        c, p = risk_dijkstra(G, source, target, alpha, lam)
+        hr = float(np.mean([G[u][v]["risk"] for u, v in EDGE_LIST
+                            if G[u][v].get("hormuz_dependent")]))
+        st.session_state.risk_hist.append({
+            "t": st.session_state.t, "hormuz_risk": round(hr, 4),
+            "path_cost": c, "path": " → ".join(p),
+        })
 
     if st.button("🔄 Reset", use_container_width=True):
         for k in list(st.session_state.keys()):
