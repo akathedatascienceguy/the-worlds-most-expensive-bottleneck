@@ -1100,6 +1100,8 @@ def _advance_window(window, G, vol=0.3):
 with st.sidebar:
     st.markdown("## 🧠 v2 Controls")
     st.markdown("---")
+    st.caption("Developed by **Nikita Gupta** & **Yash Vardhan Gupta**")
+    st.markdown("---")
     source = st.selectbox("Source", PRODUCERS, index=0)
     target = st.selectbox("Destination", CONSUMERS, index=1)
     alpha  = st.slider("⏱ α (time weight)", 0.0, 2.0, 0.5, 0.1)
