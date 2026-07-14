@@ -1,13 +1,11 @@
-In 2025 we built a simulation of a Hormuz oil crisis. "Purely hypothetical," we said. "Fun graph theory project," we said.
+The Strait of Hormuz actually closed in February 2026. We built this after that happened, not before — no prediction here, just two people who watched a crisis unfold and asked: could a structural model of this network have told us anything useful, even one that had never seen this specific event?
 
-In Feb 2026, Iran actually mined and closed the strait. So in 2026 — after the fact, no false modesty here — we sat down and built v2, with reality finally available to grade our homework.
+Turns out: mostly yes, using general data instead of anything crisis-specific. Our bypass-gap estimate (65%) landed close to reality (80%). The cascade sequence — oil, freight, CPI, food, GDP — unfolded in the order we modeled. Carriers abandoned Hormuz the moment the risk-adjusted math said to, no committee meeting required.
 
-What we got right: the bypass gap (called 65%, reality said 80% — close enough to be smug). The cascade sequence — oil → freight → CPI → food → GDP, exact order. Carriers abandoning Hormuz the second the risk-adjusted math said to, no committee meeting required.
+What the model missed, because nobody builds this stuff for free: insurers didn't just raise prices, they left outright. Governments ended up underwriting commercial shipping risk. And the "safe" backup pipeline we called the alternative got bombed a month into the crisis — turns out the escape route wasn't immune to the crisis it existed to escape.
 
-What we completely missed: insurers wouldn't just raise prices, they'd leave outright. Governments would end up underwriting commercial shipping risk. And the "safe" backup pipeline we called the alternative got bombed a month in — turns out the escape route wasn't immune to the crisis it existed to escape.
-
-So v2 isn't a victory lap, it's a correction: v1 could tell you what to do in a crisis, but only once the crisis had already become a number. v2 reads the leading signals — sentiment, insurance lag, futures vol — through an LSTM, and routes ~7 steps before the market finishes pricing it in.
+So v2 isn't a sequel, it's a correction: v1 could tell you what a crisis costs, but it had no way to read the leading signals — sentiment, insurance lag, futures vol — before they became a lagging market number. v2 does, via an LSTM feeding a routing agent that reroutes ~7 steps ahead of the market.
 
 Also retired our old Q-learning agent along the way. A lookup table covering 0.00003% of possible states was, technically, mostly guessing.
 
-Model → reality's rebuttal → better model. Full writeup + the live app (break it yourself) in the comments. 🛢️
+Built after the fact. Upgraded after that. Full writeup + the live app (break it yourself) in the comments. 🛢️
