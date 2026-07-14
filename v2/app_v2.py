@@ -1105,7 +1105,7 @@ with st.sidebar:
     source = st.selectbox("Source", PRODUCERS, index=0)
     target = st.selectbox("Destination", CONSUMERS, index=1)
     alpha  = st.slider("⏱ α (time weight)", 0.0, 2.0, 0.5, 0.1)
-    lam    = st.slider("⚠️ λ (risk aversion)", 0.0, 50.0, 10.0, 1.0)
+    lam    = st.slider("⚠️ λ (risk aversion)", 0.0, 50.0, 20.0, 1.0)
     vol    = st.slider("📈 Volatility", 0.0, 1.0, 0.30, 0.05)
 
     st.markdown("---")

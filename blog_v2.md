@@ -184,24 +184,9 @@ The market, represented by the insurance premium, doesn't finish catching up unt
 
 ## Step 5: What the Disruption Actually Costs
 
-v1 modelled the cascade as five broad stages with no day counts. V2 pins it to an explicit timeline and, more importantly, runs 500 Monte Carlo scenarios through the cascade's economic outputs, not just routing cost the way v1's Monte Carlo did.
+v1 modelled the cascade as five broad stages: oil spikes, freight reprices within weeks, consumer and food prices follow over the next month or two, central banks tighten into a supply shock they can't fix, all of it unevenly distributed by region. V2 doesn't re-derive that model. It quantifies the tail.
 
-Oil spikes within days 1 to 7, sized by how long the market expects the disruption to last:
-
-```
-Duration    Price Multiplier   Historical Calibration
-─────────────────────────────────────────────────────────────
-<= 7 days   3.5x               2019 Abqaiq attack: oil +15%
-<= 30 days  5.5x               2005 Hurricane Katrina: oil +25%
-<= 90 days  8.0x               1990 Gulf War: oil +60%
-> 90 days   12.0x              1973 Arab Embargo: oil +400%
-```
-
-The supply side buys time before it doesn't: OPEC spare capacity offsets about 35% of the disruption, and the SPR covers roughly 17 days of full Hormuz flow. Above severity 0.5, though, a panic premium takes over, inventory hoarding pushing prices past what fundamentals alone justify. Freight follows within days 8 to 30 (Cape rerouting: 14 extra days, about $630k per voyage).
-
-The demand side lags further behind: consumer prices by about 30 days, food by about 45, as the shock works through the supply chain. Central banks respond in months 2 to 6, tightening into a supply-side shock rate hikes can't actually fix, each 1% of unexpected CPI implying roughly 50bps of tightening and 0.15% of GDP contraction. A second wave, arriving after the first and outlasting it.
-
-That cost also isn't evenly distributed. The regional breakdown, now sourced to an IMF working paper as pass-through coefficients rather than ranges:
+That unevenness is the headline first. The regional breakdown, now sourced to an IMF working paper as pass-through coefficients rather than ranges:
 
 ```
 Region                          Oil Import      CPI Pass-   GDP Impact per
