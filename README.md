@@ -46,6 +46,8 @@ The simulation is clean. The underlying problem it's modelling is not.
 
 > **Try it live (v1):** [the-worlds-most-expensive-bottleneck.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app) — no setup required.
 >
+> **Try it live (v2):** [the-worlds-most-expensive-bottleneck-v2.streamlit.app](https://the-worlds-most-expensive-bottleneck-v2.streamlit.app) — LSTM + DQN, no setup required.
+>
 > **Source code:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main)
 
 ---

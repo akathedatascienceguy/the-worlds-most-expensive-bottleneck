@@ -251,5 +251,5 @@ v1 ended with a claim: the system fails not because alternatives don't exist, bu
 v2 stack: NetworkX, Plotly, Streamlit, NumPy, PyTorch, scikit-learn
 ~350,000 parameters. LSTM risk engine + DQN routing agent + economic cascade across five global regions.
 
-> **Try V2 live:** [the-worlds-most-expensive-bottleneck-v2.streamlit.app](https://the-worlds-most-expensive-bottleneck.streamlit.app)
+> **Try V2 live:** [the-worlds-most-expensive-bottleneck-v2.streamlit.app](https://the-worlds-most-expensive-bottleneck-v2.streamlit.app)
 > **Source code:** [github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck](https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/tree/main)

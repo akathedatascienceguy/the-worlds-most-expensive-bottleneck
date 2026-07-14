@@ -1,11 +1,19 @@
-The Strait of Hormuz actually closed in February 2026. We built this after that happened, not before, no prediction here, just two people who watched a crisis unfold and asked: could a structural model of this network have told us anything useful, even one that had never seen this specific event?
+We're back. 🛢️
 
-Turns out: mostly yes, using general data instead of anything crisis-specific. Our bypass-gap estimate (65%) landed close to reality (80%). The cascade sequence, oil, freight, CPI, food, GDP, unfolded in the order we modeled. Carriers abandoned Hormuz the moment the risk-adjusted math said to, no committee meeting required.
+Nikita Gupta and I just shipped v2 of The World's Most Expensive Bottleneck, published under Culture X Data Science.
 
-What the model missed, because nobody builds this stuff for free: insurers didn't just raise prices, they left outright. Governments ended up underwriting commercial shipping risk. And the "safe" backup pipeline we called the alternative got bombed a month into the crisis, turns out the escape route wasn't immune to the crisis it existed to escape.
+Quick context: the Strait of Hormuz moves about 20% of the world's seaborne oil through a channel 33km wide, no backup, no redundancy. In February 2026, it actually closed. We'd modeled exactly this scenario, so we went back, graded our own homework, and rebuilt the engine underneath it.
 
-So v2 isn't a sequel, it's a correction: v1 could tell you what a crisis costs, but it had no way to read the leading signals, sentiment, insurance lag, futures vol, before they became a lagging market number. v2 does, via an LSTM feeding a routing agent that reroutes ~7 steps ahead of the market.
+v1 could tell you what a Hormuz crisis costs. It had no way to tell you one was coming.
 
-Also retired our old Q-learning agent along the way. A lookup table covering 0.00003% of possible states was, technically, mostly guessing.
+v2 fixes that with two upgrades:
 
-The strait will close again. We'd rather not be the last ones to notice. Full writeup + the live app (break it yourself) in the comments. 🛢️
+→ An LSTM that reads the signals the market reads too late: sentiment, insurance premiums, oil volatility, and forecasts rising risk before it becomes a price. Underwriters do this by instinct. We taught a neural net to do it from data.
+
+→ A DQN that replaces our old Q-learning agent, which quietly broke the moment risk stopped fitting into a lookup table (60 trillion possible states will do that to you). The DQN doesn't memorize a table, it generalizes, so it can reason through a risk combination it's never seen before.
+
+Chain them together and the system reroutes a tanker away from Hormuz about 7 steps before the market finishes pricing in the danger. For a vessel carrying $100M of crude, that's the difference between a course correction in open water and a decision made mid-strait.
+
+Go break it yourself:
+Live app (v2): https://the-worlds-most-expensive-bottleneck-v2.streamlit.app
+Full writeup: https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/blob/main/blog_v2.md
