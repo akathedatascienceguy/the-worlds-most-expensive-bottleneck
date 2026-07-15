@@ -1341,6 +1341,72 @@ with tab3:
     trains it, watches it break — and then fixes it.
     """)
 
+    st.markdown("---")
+    already_ready = (st.session_state.lstm_model is not None
+                      and st.session_state.q_agent is not None
+                      and st.session_state.dqn_agent is not None)
+    if st.button("🎯 One-Click Divergence Demo", type="primary", use_container_width=True,
+                 help="Trains whatever isn't trained yet (LSTM, Q-learning, DQN), "
+                      "then loads the pre-crisis scenario where DQN and Dijkstra diverge."):
+        prog = st.progress(0.0, text="Starting…")
+
+        if st.session_state.lstm_model is None:
+            prog.progress(0.05, text="Generating synthetic training data…")
+            data, _ = generate_synthetic_data(G, n_steps=2000, n_events=10, seed=42)
+            st.session_state.synth_data = data
+            model = LSTMRiskPredictor(n_edges=N_EDGES)
+            results = train_lstm(model, data, epochs=120,
+                                  progress_cb=lambda v: prog.progress(
+                                      0.05 + 0.45 * v, text=f"Training LSTM… {int(v*100)}%"))
+            st.session_state.lstm_model   = model
+            st.session_state.lstm_results = results
+            st.session_state.risk_window  = data[-SEQ_LEN:].copy()
+        else:
+            prog.progress(0.50, text="LSTM already trained, skipping…")
+
+        if st.session_state.q_agent is None:
+            prog.progress(0.55, text="Training Q-learning baseline…")
+            q_agent = QLearningAgent(alpha=0.15, gamma=0.9, epsilon=0.5)
+            q_rewards = q_agent.train(G, source, target, episodes=300)
+            st.session_state.q_agent   = q_agent
+            st.session_state.q_rewards = q_rewards
+        else:
+            prog.progress(0.65, text="Q-learning already trained, skipping…")
+
+        if st.session_state.dqn_agent is None:
+            agent = DQNAgent(G, NODE_LIST, EDGE_LIST)
+            agent.train(source, target, episodes=600,
+                        progress_cb=lambda v: prog.progress(
+                            0.65 + 0.30 * v, text=f"Training DQN… episode {int(v*600)}/600"))
+            st.session_state.dqn_agent = agent
+        else:
+            prog.progress(0.95, text="DQN already trained, skipping…")
+
+        # Craft the "-5 steps from peak" divergence scenario: sentiment
+        # already falling while actual risk/insurance/oil vol are still calm.
+        prog.progress(0.98, text="Loading divergence scenario…")
+        window = np.zeros((SEQ_LEN, N_EDGES, N_FEATURES))
+        for i, (u, v) in enumerate(EDGE_LIST):
+            base = G[u][v]["base_risk"]
+            window[:, i, 0] = base
+            window[:, i, 1] = np.clip(base * 0.8 + 0.1, 0, 1)
+            window[:, i, 2] = np.clip(base * 0.7, 0, 1)
+            sentiment_start = np.clip((1 - base) * 0.8, 0, 1)
+            window[:, i, 3] = np.linspace(sentiment_start, sentiment_start * 0.4, SEQ_LEN)
+        st.session_state.risk_window = window
+        for u, v in G.edges():
+            if G[u][v].get("hormuz_dependent"):
+                G[u][v]["risk"] = G[u][v]["base_risk"]
+        st.session_state.demo_active = True
+
+        prog.empty()
+        st.success("All three models ready and the divergence scenario is loaded. "
+                   "Scroll down to **DQN vs Q-Learning vs Dijkstra Path Comparison** to see it.")
+    elif already_ready and st.session_state.get("demo_active"):
+        st.caption("✅ Divergence demo is loaded — see the comparison below.")
+
+    st.markdown("---")
+
     # ── Step 1: Q-learning, the baseline ────────────────────────────────────────
     st.markdown("### Step 1 — Q-Learning (the baseline)")
     st.markdown(r"""
@@ -1509,36 +1575,12 @@ with tab3:
         st.markdown("### DQN vs Q-Learning vs Dijkstra Path Comparison")
 
         lstm = st.session_state.lstm_model
-        demo_col1, demo_col2 = st.columns([1, 2])
-        with demo_col1:
-            demo_disabled = lstm is None
-            if st.button("🎯 Load Divergence Demo", use_container_width=True,
-                         disabled=demo_disabled,
-                         help="Requires a trained LSTM (Training tab)."):
-                # Craft the "-5 steps from peak" scenario from the blog:
-                # sentiment already dropping while actual risk, insurance,
-                # and oil vol are all still calm. Real signals a Lloyd's
-                # underwriter wouldn't yet be pricing in.
-                window = np.zeros((SEQ_LEN, N_EDGES, N_FEATURES))
-                for i, (u, v) in enumerate(EDGE_LIST):
-                    base = G[u][v]["base_risk"]
-                    window[:, i, 0] = base                               # risk: flat
-                    window[:, i, 1] = np.clip(base * 0.8 + 0.1, 0, 1)     # oil vol: flat
-                    window[:, i, 2] = np.clip(base * 0.7, 0, 1)           # insurance: flat
-                    sentiment_start = np.clip((1 - base) * 0.8, 0, 1)
-                    window[:, i, 3] = np.linspace(sentiment_start, sentiment_start * 0.4, SEQ_LEN)
-                st.session_state.risk_window = window
-                for u, v in G.edges():
-                    if G[u][v].get("hormuz_dependent"):
-                        G[u][v]["risk"] = G[u][v]["base_risk"]
-                st.session_state.demo_active = True
-        with demo_col2:
-            if demo_disabled:
-                st.caption("Train the LSTM first (Training tab) to enable this.")
-            elif st.session_state.get("demo_active"):
-                st.caption("Demo active: sentiment is falling while Hormuz risk is still at "
-                           "baseline. DQN routes on the LSTM's forecast; Dijkstra and "
-                           "Q-Learning only see today's (still-calm) numbers.")
+        if st.session_state.get("demo_active"):
+            st.caption("🎯 Divergence demo active: sentiment is falling while Hormuz risk is "
+                       "still at baseline. DQN routes on the LSTM's forecast; Dijkstra and "
+                       "Q-Learning only see today's (still-calm) numbers. Use the "
+                       "**One-Click Divergence Demo** button above to reload this, or click "
+                       "**Step** / **Hormuz Crisis** in the sidebar to leave demo mode.")
 
         if st.session_state.get("demo_active") and lstm is not None and st.session_state.risk_window is not None:
             forecast  = lstm.predict_next(st.session_state.risk_window)
