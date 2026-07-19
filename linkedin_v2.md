@@ -17,3 +17,14 @@ Chain them together and the system reroutes a tanker away from Hormuz about 7 st
 Go break it yourself:
 Live app (v2): https://the-worlds-most-expensive-bottleneck-v2.streamlit.app
 Full writeup: https://github.com/akathedatascienceguy/the-worlds-most-expensive-bottleneck/blob/main/blog_v2.md
+
+
+################
+
+We're back. 
+
+A few weeks ago, Nikita Gupta and I sat down to rebuild The World's Most Expensive Bottleneck, and ended up down a rabbit hole of modeling designs that didn't quite work, until one did. An LSTM forecasting risk from sentiment, insurance premiums, and volatility, feeding a DQN that uses those forecasts to extrapolate the optimal routing path.
+
+That's the part we love most: not the finished model, but the messy middle where you're just trying things until something clicks.
+
+Next stop: the stadium. Football X Data Science is coming. See ya there!
